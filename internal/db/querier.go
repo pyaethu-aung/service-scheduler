@@ -47,6 +47,12 @@ type Querier interface {
 	// window_end). Served by the partial GiST index on (dealership_id, period).
 	ListConfirmedAppointmentsInRange(ctx context.Context, arg ListConfirmedAppointmentsInRangeParams) ([]ListConfirmedAppointmentsInRangeRow, error)
 	ListQualifiedTechnicianIDs(ctx context.Context, arg ListQualifiedTechnicianIDsParams) ([]uuid.UUID, error)
+	// Transaction-scoped advisory lock taken before BookAppointment, so
+	// bookings for the same dealership and local day run one at a time
+	// (Section 10's hot-spot remedy). Racing inserts into the exclusion
+	// constraints otherwise deadlock (40P01). The constraints remain the
+	// guarantee: a writer that skips this lock still cannot double-book.
+	LockDealershipDay(ctx context.Context, lockKey string) error
 	UpsertCustomer(ctx context.Context, arg UpsertCustomerParams) error
 	// Reference data upserts. The seed command uses them so `make seed` can run
 	// any number of times and converge on the same data.

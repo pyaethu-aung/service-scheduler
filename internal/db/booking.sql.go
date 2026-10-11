@@ -274,3 +274,17 @@ func (q *Queries) HasFreeBay(ctx context.Context, arg HasFreeBayParams) (bool, e
 	err := row.Scan(&free)
 	return free, err
 }
+
+const lockDealershipDay = `-- name: LockDealershipDay :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Transaction-scoped advisory lock taken before BookAppointment, so
+// bookings for the same dealership and local day run one at a time
+// (Section 10's hot-spot remedy). Racing inserts into the exclusion
+// constraints otherwise deadlock (40P01). The constraints remain the
+// guarantee: a writer that skips this lock still cannot double-book.
+func (q *Queries) LockDealershipDay(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockDealershipDay, lockKey)
+	return err
+}

@@ -92,3 +92,11 @@ JOIN service_types st ON st.id = a.service_type_id
 JOIN service_bays b ON b.id = a.bay_id
 JOIN technicians t ON t.id = a.technician_id
 WHERE a.id = @id;
+
+-- name: LockDealershipDay :exec
+-- Transaction-scoped advisory lock taken before BookAppointment, so
+-- bookings for the same dealership and local day run one at a time
+-- (Section 10's hot-spot remedy). Racing inserts into the exclusion
+-- constraints otherwise deadlock (40P01). The constraints remain the
+-- guarantee: a writer that skips this lock still cannot double-book.
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));

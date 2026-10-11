@@ -3,6 +3,7 @@
 package booking_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -146,5 +147,50 @@ func TestPGStore_Book(t *testing.T) {
 	}
 	if _, err := store.Book(ctx, params("2026-11-05T10:00:00Z"), uuid.NewString(), "hash", liveSince); !errors.Is(err, pgx.ErrNoRows) {
 		t.Errorf("full slot error = %v, want pgx.ErrNoRows", err)
+	}
+}
+
+func TestPGStore_Book_SerializesPerDealershipDay(t *testing.T) {
+	t.Parallel()
+	pool := dbtest.SeededPool(t)
+	store := booking.NewPGStore(pool)
+	liveSince := time.Now().Add(-booking.KeyTTL)
+	params := func(day time.Time) db.BookAppointmentParams {
+		start := day.Add(10 * time.Hour)
+		return db.BookAppointmentParams{
+			DealershipID: seed.DealershipSaigon, CustomerID: seed.CustomerAn, VehicleID: seed.VehicleAnSedan,
+			ServiceTypeID: seed.ServiceOilChange, StartsAt: start, EndsAt: start.Add(time.Hour),
+			DayStart: day, DayEnd: day.Add(24 * time.Hour),
+		}
+	}
+	held := time.Date(2026, 11, 9, 17, 0, 0, 0, time.UTC) // Tuesday 2026-11-10 in Ho Chi Minh City
+	other := held.Add(24 * time.Hour)
+
+	// Another transaction holds the lock for that dealership and day.
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(t.Context()) }()
+	if err := db.New(tx).LockDealershipDay(t.Context(), seed.DealershipSaigon.String()+"|"+held.Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+
+	// A booking on the same day waits for it...
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := store.Book(ctx, params(held), uuid.NewString(), "hash", liveSince); err == nil {
+		t.Fatal("booking on the locked day did not wait for the lock")
+	}
+	// ...while another day goes straight through.
+	if _, err := store.Book(t.Context(), params(other), uuid.NewString(), "hash", liveSince); err != nil {
+		t.Fatalf("booking on another day: %v", err)
+	}
+	// Once released, the same day books.
+	if err := tx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Book(t.Context(), params(held), uuid.NewString(), "hash", liveSince); err != nil {
+		t.Fatalf("booking after the lock was released: %v", err)
 	}
 }
