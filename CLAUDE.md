@@ -92,8 +92,12 @@ cmd/server ──> internal/api ──> internal/booking ──┬──> intern
   `make test-concurrency` many times.
 - **Booking errors.** `booking.ValidationError` maps to 422 `invalidParams`,
   `NotFoundError` to 404, `UnavailableError` to 409 with `reason` and
-  `suggestedStarts`. Malformed POST /v1/appointments requests are 422, not
-  400 (Section 7 has no 400 there); other routes answer 400.
+  `suggestedStarts`. `requestError` keeps each route's documented statuses:
+  malformed POST /v1/appointments requests are 422 (Section 7 has no 400
+  there), a non-UUID appointment id is 404, and other routes answer 400.
+- **Cancel** (`booking.Service.Cancel`) is idempotent: it keeps the first
+  `cancelled_at` and returns the current state, so a repeated cancel is 200
+  with the same body.
 - **Time in the slot engine.** `internal/slots` steps through real instants
   from the opening instant: spring-forward gaps are skipped, the fall-back
   hour is offered twice. Booking must validate starts with `slots.OnGrid` so
