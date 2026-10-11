@@ -7,12 +7,25 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 )
+
+// kin-openapi checks "date" against a structural regex only and does not
+// check "uuid" at all (its built-in pattern also rejects UUIDv7). Register
+// both so the contract tests enforce the formats the document declares.
+func init() {
+	openapi3.DefineStringFormatValidator("uuid", openapi3.NewRegexpFormatValidator(
+		`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`))
+	openapi3.DefineStringFormatValidator("date", openapi3.NewCallbackValidator(func(s string) error {
+		_, err := time.Parse(time.DateOnly, s)
+		return err
+	}))
+}
 
 // contract validates requests and responses against the embedded OpenAPI
 // document, so every handler test doubles as a contract test.
