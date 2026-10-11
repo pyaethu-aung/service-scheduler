@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"slices"
 	"strings"
@@ -23,9 +24,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/pyaethu-aung/service-scheduler/internal/availability"
 	"github.com/pyaethu-aung/service-scheduler/internal/db"
+	"github.com/pyaethu-aung/service-scheduler/internal/observability"
 	"github.com/pyaethu-aung/service-scheduler/internal/slots"
 )
 
@@ -123,6 +128,9 @@ const (
 type UnavailableError struct {
 	Reason    string
 	Suggested []time.Time
+	// RetriesExhausted is true when every attempt lost a race, rather than
+	// the first attempt finding nothing free.
+	RetriesExhausted bool
 }
 
 func (e *UnavailableError) Error() string {
@@ -163,30 +171,108 @@ type Service struct {
 	granularity  time.Duration
 	now          func() time.Time
 	// pause waits between attempts; tests replace it.
-	pause func(ctx context.Context, attempt int) error
+	pause    func(ctx context.Context, attempt int) error
+	logger   *slog.Logger
+	recorder Recorder
 }
+
+// Recorder receives booking metrics (Section 9).
+type Recorder interface {
+	Booking(outcome string)
+	ConflictRetry()
+}
+
+type noRecorder struct{}
+
+func (noRecorder) Booking(string) {}
+func (noRecorder) ConflictRetry() {}
 
 // New returns a Service. granularity is the start-time grid step (A7) and
 // now is the clock.
 func New(store Store, avail Availability, granularity time.Duration, now func() time.Time) *Service {
-	return &Service{store: store, availability: avail, granularity: granularity, now: now, pause: jitterPause}
+	return &Service{
+		store: store, availability: avail, granularity: granularity, now: now, pause: jitterPause,
+		logger: slog.New(slog.DiscardHandler), recorder: noRecorder{},
+	}
+}
+
+// Instrument sends booking logs to logger and metrics to recorder.
+func (s *Service) Instrument(logger *slog.Logger, recorder Recorder) *Service {
+	s.logger, s.recorder = logger, recorder
+	return s
 }
 
 // Book validates req and books it, or replays it when its Idempotency-Key
 // already booked the same request.
 func (s *Service) Book(ctx context.Context, req Request) (Result, error) {
+	ctx, span := observability.Tracer().Start(ctx, "booking.Book", trace.WithAttributes(
+		attribute.String("dealership_id", req.DealershipID.String()),
+		attribute.String("service_type_id", req.ServiceTypeID.String()),
+	))
+	defer span.End()
+
+	res, attempts, err := s.book(ctx, req)
+	outcome := outcomeOf(res, err)
+	if outcome != "" {
+		s.recorder.Booking(outcome)
+	}
+	if err != nil && outcome == "" {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	span.SetAttributes(attribute.String("outcome", outcome), attribute.Int("attempt", attempts))
+
+	// IDs only: customer names, emails and phone numbers are never logged.
+	attrs := []any{
+		"dealership_id", req.DealershipID, "service_type_id", req.ServiceTypeID,
+		"outcome", outcome, "attempt", attempts,
+	}
+	if res.Appointment.ID != uuid.Nil {
+		attrs = append(attrs, "appointment_id", res.Appointment.ID)
+	}
+	if outcome != "" {
+		s.logger.InfoContext(ctx, "booking", attrs...)
+	}
+	return res, err
+}
+
+// outcomeOf classifies a booking for the outcome metric, or "" for an
+// internal error.
+func outcomeOf(res Result, err error) string {
+	var (
+		invalid     *ValidationError
+		notFound    *NotFoundError
+		unavailable *UnavailableError
+	)
+	switch {
+	case err == nil && res.Replayed:
+		return observability.OutcomeReplayed
+	case err == nil:
+		return observability.OutcomeCreated
+	case errors.As(err, &invalid), errors.As(err, &notFound):
+		return observability.OutcomeInvalid
+	case errors.As(err, &unavailable) && unavailable.RetriesExhausted:
+		return observability.OutcomeConflictExhausted
+	case errors.As(err, &unavailable):
+		return observability.OutcomeNoCapacity
+	}
+	return ""
+}
+
+// book does the work of Book and reports how many claim attempts it made.
+func (s *Service) book(ctx context.Context, req Request) (Result, int, error) {
 	if err := checkRequired(req); err != nil {
-		return Result{}, err
+		return Result{}, 0, err
 	}
 	v, err := s.validate(ctx, req)
 	if err != nil {
-		return Result{}, err
+		return Result{}, 0, err
 	}
 
 	hash := requestHash(req)
 	liveSince := s.now().Add(-KeyTTL)
 	if res, ok, err := s.replay(ctx, req.IdempotencyKey, hash, liveSince); ok || err != nil {
-		return res, err
+		return res, 0, err
 	}
 
 	params := db.BookAppointmentParams{
@@ -200,30 +286,31 @@ func (s *Service) Book(ctx context.Context, req Request) (Result, error) {
 		DayEnd:        v.day.End,
 	}
 	for attempt := 1; ; attempt++ {
-		id, err := s.store.Book(ctx, params, req.IdempotencyKey, hash, liveSince)
+		id, err := s.attempt(ctx, attempt, params, req.IdempotencyKey, hash, liveSince)
 		switch {
 		case err == nil:
 			a, err := s.details(ctx, id)
-			return Result{Appointment: a}, err
+			return Result{Appointment: a}, attempt, err
 		case errors.Is(err, ErrKeyClaimed):
 			res, ok, err := s.replay(ctx, req.IdempotencyKey, hash, liveSince)
 			if !ok && err == nil {
 				err = fmt.Errorf("idempotency key %q claimed but not found", req.IdempotencyKey)
 			}
-			return res, err
+			return res, attempt, err
 		case errors.Is(err, pgx.ErrNoRows):
-			return Result{}, s.unavailable(ctx, req, v)
+			return Result{}, attempt, s.unavailable(ctx, req, v, false)
 		case errors.Is(err, db.ErrSlotTaken):
 			// A concurrent booking won between our read and our insert. The
 			// next attempt, in a new transaction, sees it and picks again.
 			if attempt == MaxAttempts {
-				return Result{}, s.unavailable(ctx, req, v)
+				return Result{}, attempt, s.unavailable(ctx, req, v, true)
 			}
+			s.recorder.ConflictRetry()
 			if err := s.pause(ctx, attempt); err != nil {
-				return Result{}, err
+				return Result{}, attempt, err
 			}
 		default:
-			return Result{}, fmt.Errorf("book: %w", err)
+			return Result{}, attempt, fmt.Errorf("book: %w", err)
 		}
 	}
 }
@@ -243,6 +330,29 @@ func (s *Service) Cancel(ctx context.Context, id uuid.UUID) (Appointment, error)
 		return Appointment{}, err
 	}
 	return s.details(ctx, id)
+}
+
+// attempt runs one claim-and-insert transaction in its own span.
+func (s *Service) attempt(ctx context.Context, n int, params db.BookAppointmentParams, key, hash string, liveSince time.Time) (uuid.UUID, error) {
+	ctx, span := observability.Tracer().Start(ctx, "booking.attempt", trace.WithAttributes(attribute.Int("attempt", n)))
+	defer span.End()
+	id, err := s.store.Book(ctx, params, key, hash, liveSince)
+	if err != nil {
+		span.SetAttributes(attribute.String("result", attemptResult(err)))
+	}
+	return id, err
+}
+
+func attemptResult(err error) string {
+	switch {
+	case errors.Is(err, db.ErrSlotTaken):
+		return "slot_taken"
+	case errors.Is(err, pgx.ErrNoRows):
+		return "nothing_free"
+	case errors.Is(err, ErrKeyClaimed):
+		return "key_claimed"
+	}
+	return "error"
 }
 
 // validated holds what validation derived from the request.
@@ -369,7 +479,7 @@ func (s *Service) replay(ctx context.Context, key, hash string, liveSince time.T
 
 // unavailable explains a refusal: which resource ran out, and the free
 // starts nearest the requested one on the same local day.
-func (s *Service) unavailable(ctx context.Context, req Request, v validated) error {
+func (s *Service) unavailable(ctx context.Context, req Request, v validated, exhausted bool) error {
 	free, err := s.store.HasFreeBay(ctx, db.HasFreeBayParams{
 		DealershipID: req.DealershipID, StartsAt: v.start, EndsAt: v.start.Add(v.duration),
 	})
@@ -387,7 +497,7 @@ func (s *Service) unavailable(ctx context.Context, req Request, v validated) err
 	if err != nil {
 		return fmt.Errorf("suggest starts: %w", err)
 	}
-	return &UnavailableError{Reason: reason, Suggested: nearest(res.Starts, v.start, maxSuggestions)}
+	return &UnavailableError{Reason: reason, Suggested: nearest(res.Starts, v.start, maxSuggestions), RetriesExhausted: exhausted}
 }
 
 // nearest returns up to n of starts closest to target, excluding target,
