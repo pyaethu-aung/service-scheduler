@@ -18,6 +18,16 @@ type Querier interface {
 	// Inserts an appointment on an explicit bay and technician. The exclusion
 	// constraints reject any overlap with a confirmed appointment (23P01).
 	CreateAppointment(ctx context.Context, arg CreateAppointmentParams) (Appointment, error)
+	// Read path for availability (docs/system-design.md Section 5.1).
+	GetDealership(ctx context.Context, id uuid.UUID) (GetDealershipRow, error)
+	// No row means the dealership is closed on that weekday (0 = Sunday).
+	GetOpeningHours(ctx context.Context, arg GetOpeningHoursParams) (GetOpeningHoursRow, error)
+	GetServiceType(ctx context.Context, id uuid.UUID) (GetServiceTypeRow, error)
+	ListActiveBayIDs(ctx context.Context, dealershipID uuid.UUID) ([]uuid.UUID, error)
+	// Confirmed appointments at the dealership overlapping [window_start,
+	// window_end). Served by the partial GiST index on (dealership_id, period).
+	ListConfirmedAppointmentsInRange(ctx context.Context, arg ListConfirmedAppointmentsInRangeParams) ([]ListConfirmedAppointmentsInRangeRow, error)
+	ListQualifiedTechnicianIDs(ctx context.Context, arg ListQualifiedTechnicianIDsParams) ([]uuid.UUID, error)
 	UpsertCustomer(ctx context.Context, arg UpsertCustomerParams) error
 	// Reference data upserts. The seed command uses them so `make seed` can run
 	// any number of times and converge on the same data.
