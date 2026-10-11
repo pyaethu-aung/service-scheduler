@@ -139,6 +139,10 @@ test: ## Unit tests with the race detector (no Docker needed)
 test-integration: ## Unit and integration tests (needs Docker for testcontainers)
 	go test -race -tags=integration ./...
 
+.PHONY: test-concurrency
+test-concurrency: ## The NFR1 proof: 50 concurrent bookings for one free bay (needs Docker)
+	go test -race -tags=integration -count=1 -run '^TestConcurrentBooking' -v ./internal/api/
+
 .PHONY: coverage
 coverage: ## All tests with coverage; fails below COVERAGE_MIN% (generated code excluded)
 	scripts/coverage.sh $(COVERAGE_MIN)
