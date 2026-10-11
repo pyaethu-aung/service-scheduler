@@ -146,6 +146,7 @@ type Store interface {
 	GetIdempotencyKey(ctx context.Context, arg db.GetIdempotencyKeyParams) (db.IdempotencyKey, error)
 	GetAppointmentDetails(ctx context.Context, id uuid.UUID) (db.GetAppointmentDetailsRow, error)
 	HasFreeBay(ctx context.Context, arg db.HasFreeBayParams) (bool, error)
+	CancelAppointment(ctx context.Context, id uuid.UUID) (db.Appointment, error)
 	DeleteExpiredIdempotencyKeys(ctx context.Context, liveSince time.Time) (int64, error)
 	Book(ctx context.Context, arg db.BookAppointmentParams, key, requestHash string, liveSince time.Time) (uuid.UUID, error)
 }
@@ -225,6 +226,23 @@ func (s *Service) Book(ctx context.Context, req Request) (Result, error) {
 			return Result{}, fmt.Errorf("book: %w", err)
 		}
 	}
+}
+
+// Get returns the appointment in its current state.
+func (s *Service) Get(ctx context.Context, id uuid.UUID) (Appointment, error) {
+	return s.details(ctx, id)
+}
+
+// Cancel cancels the appointment, releasing its bay and technician at once
+// (FR5, Section 5.4): the row leaves the partial exclusion constraints and is
+// kept for history. Cancelling again changes nothing and returns the same
+// state, including the first cancellation time.
+func (s *Service) Cancel(ctx context.Context, id uuid.UUID) (Appointment, error) {
+	_, err := s.store.CancelAppointment(ctx, id)
+	if err := found(err, "appointment", id); err != nil {
+		return Appointment{}, err
+	}
+	return s.details(ctx, id)
 }
 
 // validated holds what validation derived from the request.
@@ -395,8 +413,8 @@ func nearest(starts []time.Time, target time.Time, n int) []time.Time {
 
 func (s *Service) details(ctx context.Context, id uuid.UUID) (Appointment, error) {
 	d, err := s.store.GetAppointmentDetails(ctx, id)
-	if err != nil {
-		return Appointment{}, fmt.Errorf("load appointment %s: %w", id, err)
+	if err := found(err, "appointment", id); err != nil {
+		return Appointment{}, err
 	}
 	return Appointment{
 		ID:         d.ID,

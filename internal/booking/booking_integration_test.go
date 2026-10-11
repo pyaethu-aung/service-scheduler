@@ -194,3 +194,48 @@ func TestPGStore_Book_SerializesPerDealershipDay(t *testing.T) {
 		t.Fatalf("booking after the lock was released: %v", err)
 	}
 }
+
+func TestCancel_FreesTheSlot(t *testing.T) {
+	t.Parallel()
+	svc, _ := newService(t)
+	const start = "2026-11-10T10:00:00Z" // Tuesday, London (GMT)
+
+	var booked []booking.Appointment
+	for range 3 {
+		res, err := svc.Book(t.Context(), londonRequest(uuid.NewString(), start))
+		if err != nil {
+			t.Fatal(err)
+		}
+		booked = append(booked, res.Appointment)
+	}
+	var ue *booking.UnavailableError
+	if _, err := svc.Book(t.Context(), londonRequest(uuid.NewString(), start)); !errors.As(err, &ue) {
+		t.Fatalf("fourth booking error = %v, want 409 while all bays are taken", err)
+	}
+
+	first, err := svc.Cancel(t.Context(), booked[1].ID)
+	if err != nil || first.Status != "cancelled" {
+		t.Fatalf("cancel = %+v, %v", first, err)
+	}
+	second, err := svc.Cancel(t.Context(), booked[1].ID)
+	if err != nil || second != first {
+		t.Errorf("second cancel = %+v, %v; want the same state", second, err)
+	}
+	if got, err := svc.Get(t.Context(), booked[1].ID); err != nil || got != first {
+		t.Errorf("get after cancel = %+v, %v", got, err)
+	}
+
+	// The freed bay takes the next booking for the same time.
+	res, err := svc.Book(t.Context(), londonRequest(uuid.NewString(), start))
+	if err != nil {
+		t.Fatalf("booking after cancel: %v", err)
+	}
+	if res.Appointment.Bay.ID != booked[1].Bay.ID {
+		t.Errorf("rebooked bay %s, want the freed bay %s", res.Appointment.Bay.ID, booked[1].Bay.ID)
+	}
+
+	var nf *booking.NotFoundError
+	if _, err := svc.Cancel(t.Context(), uuid.New()); !errors.As(err, &nf) {
+		t.Errorf("cancel unknown: error = %v", err)
+	}
+}
