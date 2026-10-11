@@ -1,0 +1,150 @@
+# Service scheduler request collection (the frontend stub, Section 7).
+#
+# Written for the VS Code REST Client extension (named requests feed the
+# appointment id into the get and cancel calls). Run against a seeded stack:
+#   make up && make migrate && make seed
+# then send the requests top to bottom.
+#
+# Idempotency keys live for 24 hours. To run the whole story again within a
+# day, change @date to another future weekday and @run to any new value.
+
+@baseUrl = http://localhost:8080
+@apiKey = dev-api-key
+@run = 1
+@date = 2027-03-02
+
+# Seed data (internal/seed): Islington Service Centre, Europe/London,
+# open Monday to Friday 08:00-18:00 and Saturday 09:00-13:00, three bays.
+@dealership = 01990000-0000-7000-8000-000000000102
+@oilChange = 01990000-0000-7000-8000-000000000401
+@olivia = 01990000-0000-7000-8000-000000000503
+@oliviasFord = 01990000-0000-7000-8000-000000000604
+@samuel = 01990000-0000-7000-8000-000000000504
+@samuelsGolf = 01990000-0000-7000-8000-000000000605
+
+### Liveness: no API key needed
+GET {{baseUrl}}/healthz
+
+### Readiness: database reachable and migrations applied
+GET {{baseUrl}}/readyz
+
+### Availability: free oil-change starts on @date, in UTC
+GET {{baseUrl}}/v1/dealerships/{{dealership}}/availability?serviceTypeId={{oilChange}}&date={{date}}
+X-API-Key: {{apiKey}}
+
+### Booking: 201 with the assigned bay and technician
+# @name book
+POST {{baseUrl}}/v1/appointments
+X-API-Key: {{apiKey}}
+Idempotency-Key: run-{{run}}-first
+Content-Type: application/json
+
+{
+  "dealershipId": "{{dealership}}",
+  "customerId": "{{olivia}}",
+  "vehicleId": "{{oliviasFord}}",
+  "serviceTypeId": "{{oilChange}}",
+  "startsAt": "{{date}}T10:00:00Z"
+}
+
+### Idempotent replay: same key and body, 200 with the same appointment
+POST {{baseUrl}}/v1/appointments
+X-API-Key: {{apiKey}}
+Idempotency-Key: run-{{run}}-first
+Content-Type: application/json
+
+{
+  "dealershipId": "{{dealership}}",
+  "customerId": "{{olivia}}",
+  "vehicleId": "{{oliviasFord}}",
+  "serviceTypeId": "{{oilChange}}",
+  "startsAt": "{{date}}T10:00:00Z"
+}
+
+### Same key, different body: 422 (Idempotency-Key reused)
+POST {{baseUrl}}/v1/appointments
+X-API-Key: {{apiKey}}
+Idempotency-Key: run-{{run}}-first
+Content-Type: application/json
+
+{
+  "dealershipId": "{{dealership}}",
+  "customerId": "{{olivia}}",
+  "vehicleId": "{{oliviasFord}}",
+  "serviceTypeId": "{{oilChange}}",
+  "startsAt": "{{date}}T11:00:00Z"
+}
+
+### Second booking for the same time: 201 in another bay
+POST {{baseUrl}}/v1/appointments
+X-API-Key: {{apiKey}}
+Idempotency-Key: run-{{run}}-second
+Content-Type: application/json
+
+{
+  "dealershipId": "{{dealership}}",
+  "customerId": "{{samuel}}",
+  "vehicleId": "{{samuelsGolf}}",
+  "serviceTypeId": "{{oilChange}}",
+  "startsAt": "{{date}}T10:00:00Z"
+}
+
+### Third booking for the same time: 201 in the last bay
+POST {{baseUrl}}/v1/appointments
+X-API-Key: {{apiKey}}
+Idempotency-Key: run-{{run}}-third
+Content-Type: application/json
+
+{
+  "dealershipId": "{{dealership}}",
+  "customerId": "{{samuel}}",
+  "vehicleId": "{{samuelsGolf}}",
+  "serviceTypeId": "{{oilChange}}",
+  "startsAt": "{{date}}T10:00:00Z"
+}
+
+### Conflict: all three bays are taken, 409 with reason and suggestedStarts
+POST {{baseUrl}}/v1/appointments
+X-API-Key: {{apiKey}}
+Idempotency-Key: run-{{run}}-fourth
+Content-Type: application/json
+
+{
+  "dealershipId": "{{dealership}}",
+  "customerId": "{{olivia}}",
+  "vehicleId": "{{oliviasFord}}",
+  "serviceTypeId": "{{oilChange}}",
+  "startsAt": "{{date}}T10:00:00Z"
+}
+
+### Fetch the first booking
+GET {{baseUrl}}/v1/appointments/{{book.response.body.$.id}}
+X-API-Key: {{apiKey}}
+
+### Cancel it: 200, status cancelled, its bay is free again
+POST {{baseUrl}}/v1/appointments/{{book.response.body.$.id}}/cancel
+X-API-Key: {{apiKey}}
+
+### Cancel again: 200 with the same state (idempotent)
+POST {{baseUrl}}/v1/appointments/{{book.response.body.$.id}}/cancel
+X-API-Key: {{apiKey}}
+
+### The freed bay takes a new booking for the same time: 201
+POST {{baseUrl}}/v1/appointments
+X-API-Key: {{apiKey}}
+Idempotency-Key: run-{{run}}-after-cancel
+Content-Type: application/json
+
+{
+  "dealershipId": "{{dealership}}",
+  "customerId": "{{olivia}}",
+  "vehicleId": "{{oliviasFord}}",
+  "serviceTypeId": "{{oilChange}}",
+  "startsAt": "{{date}}T10:00:00Z"
+}
+
+### Missing API key: 403
+GET {{baseUrl}}/v1/dealerships/{{dealership}}/availability?serviceTypeId={{oilChange}}&date={{date}}
+
+### Prometheus metrics: no API key needed
+GET {{baseUrl}}/metrics
