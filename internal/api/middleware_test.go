@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/pyaethu-aung/service-scheduler/internal/booking"
 	"github.com/pyaethu-aung/service-scheduler/internal/observability"
@@ -192,5 +195,45 @@ func TestContract_Readyz(t *testing.T) {
 				t.Errorf("got %d %s, want %d containing %s", rec.Code, rec.Body, tt.status, tt.want)
 			}
 		})
+	}
+}
+
+// Not parallel: it replaces the global tracer provider for its duration.
+func TestObserve_ProbesAreCountedButNotTracedOrLogged(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	t.Cleanup(func() { otel.SetTracerProvider(previous) })
+
+	var logs strings.Builder
+	metrics := observability.NewMetrics()
+	fake := &fakeBooking{res: booking.Result{Appointment: bookedAppointment("confirmed")}}
+	srv := NewServer(nil, fake, observability.NewLogger(&logs)).WithReadiness(fakeReadiness{})
+	h := NewRouter(srv, Options{APIKey: "k", Metrics: metrics})
+
+	for _, path := range []string{"/metrics", "/healthz", "/readyz", "/v1/appointments/" + uuid.NewString()} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		req.Header.Set("X-API-Key", "k")
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	var names []string
+	for _, s := range recorder.Ended() {
+		names = append(names, s.Name())
+	}
+	if len(names) != 1 || names[0] != "GET /v1/appointments/{appointmentId}" {
+		t.Errorf("spans = %v, want only the appointment request", names)
+	}
+	if n := strings.Count(logs.String(), `"msg":"request"`); n != 1 || !strings.Contains(logs.String(), `"route":"/v1/appointments/{appointmentId}"`) {
+		t.Errorf("access log lines = %d (%s), want only the appointment request", n, logs.String())
+	}
+
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
+	for _, route := range []string{"/metrics", "/healthz", "/readyz"} {
+		want := `http_server_request_duration_seconds_count{method="GET",route="` + route + `",status="200"} 1`
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("probe %s not counted: missing %s", route, want)
+		}
 	}
 }
