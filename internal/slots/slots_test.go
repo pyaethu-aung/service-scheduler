@@ -335,3 +335,36 @@ func TestNotBefore(t *testing.T) {
 		t.Errorf("past day: %v", got)
 	}
 }
+
+func TestDateOfAndDayBounds(t *testing.T) {
+	t.Parallel()
+	saigon := mustLoad(t, "Asia/Ho_Chi_Minh")
+	london := mustLoad(t, "Europe/London")
+
+	// 23:30Z on the 19th is already the 20th in Ho Chi Minh City.
+	if got := DateOf(utc("2026-10-19T23:30:00Z"), saigon); got != (Date{2026, time.October, 20}) {
+		t.Errorf("DateOf = %+v, want 2026-10-20", got)
+	}
+
+	tests := []struct {
+		name       string
+		date       Date
+		loc        *time.Location
+		start, end string
+		hours      time.Duration
+	}{
+		{"ordinary day", Date{2026, time.October, 20}, saigon, "2026-10-19T17:00:00Z", "2026-10-20T17:00:00Z", 24 * time.Hour},
+		{"spring forward is 23h", Date{2026, time.March, 29}, london, "2026-03-29T00:00:00Z", "2026-03-29T23:00:00Z", 23 * time.Hour},
+		{"fall back is 25h", Date{2026, time.October, 25}, london, "2026-10-24T23:00:00Z", "2026-10-26T00:00:00Z", 25 * time.Hour},
+		{"month end rolls over", Date{2026, time.October, 31}, london, "2026-10-31T00:00:00Z", "2026-11-01T00:00:00Z", 24 * time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := DayBounds(tt.date, tt.loc)
+			if !got.Start.Equal(utc(tt.start)) || !got.End.Equal(utc(tt.end)) || got.End.Sub(got.Start) != tt.hours {
+				t.Errorf("DayBounds = [%s, %s), want [%s, %s) of %s", got.Start, got.End, tt.start, tt.end, tt.hours)
+			}
+		})
+	}
+}

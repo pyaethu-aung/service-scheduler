@@ -31,6 +31,23 @@ func (d Date) Weekday() time.Weekday {
 	return time.Date(d.Year, d.Month, d.Day, 12, 0, 0, 0, time.UTC).Weekday()
 }
 
+// DateOf returns the local calendar date of t in loc.
+func DateOf(t time.Time, loc *time.Location) Date {
+	l := t.In(loc)
+	return Date{Year: l.Year(), Month: l.Month(), Day: l.Day()}
+}
+
+// DayBounds returns the local day as a half-open UTC interval
+// [first instant of the date, first instant of the next date). It is 23 or
+// 25 hours long on DST change days.
+func DayBounds(date Date, loc *time.Location) Interval {
+	next := time.Date(date.Year, date.Month, date.Day+1, 0, 0, 0, 0, time.UTC)
+	return Interval{
+		Start: instant(date, 0, loc).UTC(),
+		End:   instant(Date{Year: next.Year(), Month: next.Month(), Day: next.Day()}, 0, loc).UTC(),
+	}
+}
+
 // Hours are a day's opening hours as offsets from local midnight on the wall
 // clock, e.g. 8h and 18h for 08:00 to 18:00.
 type Hours struct {
