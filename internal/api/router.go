@@ -29,7 +29,7 @@ type Options struct {
 func NewRouter(srv *Server, opts Options) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(observe(srv.logger, opts.Metrics))
+	r.Use(observe(r, srv.logger, opts.Metrics))
 	r.Use(recoverer(srv.logger))
 	r.Use(deadline(cmp.Or(opts.RequestTimeout, DefaultRequestTimeout)))
 	r.Use(limitBody(cmp.Or(opts.MaxBodyBytes, DefaultMaxBodyBytes)))

@@ -80,7 +80,7 @@ func deadline(d time.Duration) func(http.Handler) http.Handler {
 // observe wraps each request in a server span (continuing an incoming W3C
 // trace), then writes one access log line and records the request duration
 // by route template once the router has matched the request.
-func observe(logger *slog.Logger, metrics *observability.Metrics) func(http.Handler) http.Handler {
+func observe(mux *chi.Mux, logger *slog.Logger, metrics *observability.Metrics) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -95,7 +95,7 @@ func observe(logger *slog.Logger, metrics *observability.Metrics) func(http.Hand
 			if status == 0 {
 				status = http.StatusOK
 			}
-			route := routeOf(r)
+			route := routeOf(mux, r)
 			elapsed := time.Since(start)
 
 			span.SetName(r.Method + " " + route)
@@ -116,12 +116,17 @@ func observe(logger *slog.Logger, metrics *observability.Metrics) func(http.Hand
 }
 
 // routeOf returns the matched route template, never the raw path, so IDs
-// stay out of metric labels and logs.
-func routeOf(r *http.Request) string {
+// stay out of metric labels and logs. A request rejected before routing
+// (a 403 from the API-key check) is labelled with the template it would
+// have matched.
+func routeOf(mux *chi.Mux, r *http.Request) string {
 	if rc := chi.RouteContext(r.Context()); rc != nil {
 		if p := rc.RoutePattern(); p != "" {
 			return p
 		}
+	}
+	if p := mux.Find(chi.NewRouteContext(), r.Method, r.URL.Path); p != "" {
+		return p
 	}
 	return "unmatched"
 }
