@@ -169,6 +169,136 @@ integration tests with the coverage gate, and a check that sqlc and
 oapi-codegen output matches its sources. `security.yml` runs govulncheck.
 The git hooks installed by `make setup` run the same checks locally.
 
+## Step-by-step: run and verify
+
+A full walkthrough from a fresh clone, ending with proof that double booking
+cannot happen. Every command was run against the stack as written.
+
+### 1. Start clean
+
+```sh
+make setup                               # once: tools, git hooks, .env
+COMPOSE_PROFILES=observability make up   # API, PostgreSQL 18, Collector, Jaeger, Prometheus
+make migrate
+make seed
+curl -s localhost:8080/readyz            # expect "status":"ready"
+```
+
+If port 5432 is taken, set `POSTGRES_PORT` and the port in `DATABASE_URL` in
+`.env` first. Before `make migrate`, `/readyz` answers `not_ready` and the
+startup log warns that key cleanup is waiting; both are expected.
+
+### 2. Run the automated tests
+
+```sh
+make test               # unit tests, race detector, no Docker
+make test-integration   # adds the real PostgreSQL 18 tests (Docker)
+make test-api           # every handler response checked against the OpenAPI contract
+make coverage           # all tests, fails below 85%
+make lint
+```
+
+### 3. Set up shell variables for the manual checks
+
+```sh
+KEY=dev-api-key
+LONDON=01990000-0000-7000-8000-000000000102
+OIL=01990000-0000-7000-8000-000000000401
+RUN=$(date +%s)        # makes idempotency keys unique per run
+DATE=2027-04-13        # any future weekday you have not booked yet
+book() {  # usage: book <idempotency-key> <HH:MM>
+  curl -s -w "\nHTTP %{http_code}\n" -X POST localhost:8080/v1/appointments \
+    -H "X-API-Key: $KEY" -H "Content-Type: application/json" -H "Idempotency-Key: $1" \
+    -d '{"dealershipId":"'$LONDON'","customerId":"01990000-0000-7000-8000-000000000503",
+         "vehicleId":"01990000-0000-7000-8000-000000000604","serviceTypeId":"'$OIL'",
+         "startsAt":"'$DATE'T'$2':00Z"}'
+}
+```
+
+### 4. Verify that double booking cannot happen
+
+**a) The automated proof: 50 concurrent requests, one free bay.**
+
+```sh
+make test-concurrency
+```
+
+Expect exactly one `201`, 49 `409`s and exactly one confirmed row. The log
+line also shows how many racing inserts the database rejected.
+
+**b) A live race against the running API: 20 requests at once for a slot
+with 3 bays.**
+
+```sh
+BODY='{"dealershipId":"'$LONDON'","customerId":"01990000-0000-7000-8000-000000000503","vehicleId":"01990000-0000-7000-8000-000000000604","serviceTypeId":"'$OIL'","startsAt":"'$DATE'T10:00:00Z"}'
+seq 1 20 | xargs -P 20 -I{} curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:8080/v1/appointments \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" -H "Idempotency-Key: race-$RUN-{}" -d "$BODY" | sort | uniq -c
+```
+
+Expect `3 201` and `17 409`: one booking per bay. Confirm in the database
+that no bay holds two:
+
+```sh
+docker compose exec -T postgres psql -U scheduler -d scheduler -c \
+"SELECT b.name AS bay, count(*) AS confirmed FROM appointments a JOIN service_bays b ON b.id = a.bay_id
+ WHERE a.status = 'confirmed' AND a.period && tstzrange('$DATE 10:00+00', '$DATE 11:00+00')
+ GROUP BY b.name ORDER BY b.name;"
+```
+
+Expect Bay A, Bay B and Bay C with `1` each.
+
+**c) Bypass the API: try to double-book directly in SQL.**
+
+```sh
+docker compose exec -T postgres psql -U scheduler -d scheduler -c \
+"INSERT INTO appointments (dealership_id, customer_id, vehicle_id, service_type_id, bay_id, technician_id, starts_at, ends_at)
+ SELECT dealership_id, customer_id, vehicle_id, service_type_id, bay_id, technician_id,
+        starts_at + interval '30 minutes', ends_at + interval '30 minutes'
+ FROM appointments WHERE status = 'confirmed' AND starts_at = '$DATE 10:00+00' LIMIT 1;"
+```
+
+Expect `ERROR: conflicting key value violates exclusion constraint
+"appointments_no_bay_overlap"`. The guarantee lives in the database, so
+scripts and other services cannot break it either.
+
+**d) Touching bookings are allowed, and cancelling frees the slot.**
+
+```sh
+book "edge-$RUN" 11:00      # 201: starts exactly when the 10:00 bookings end (half-open intervals)
+book "full-$RUN" 10:00      # 409 no_bay_available, with suggestedStarts
+ID=$(docker compose exec -T postgres psql -U scheduler -d scheduler -Atc \
+  "SELECT id FROM appointments WHERE status='confirmed' AND starts_at='$DATE 10:00+00' LIMIT 1;")
+curl -s -X POST -H "X-API-Key: $KEY" localhost:8080/v1/appointments/$ID/cancel   # 200, cancelled
+book "after-cancel-$RUN" 10:00   # 201: the freed bay is bookable again
+```
+
+### 5. Check the rest of the API
+
+```sh
+book "replay-$RUN" 14:00    # 201
+book "replay-$RUN" 14:00    # 200: the same appointment, nothing new booked
+book "grid-$RUN" 14:05      # 422: off the 15-minute grid
+curl -s -o /dev/null -w "%{http_code}\n" \
+  "localhost:8080/v1/dealerships/$LONDON/availability?serviceTypeId=$OIL&date=$DATE"   # 403: no API key
+```
+
+### 6. Look at the traces and metrics
+
+- **Jaeger** (<http://localhost:16686>): pick service `service-scheduler`,
+  operation `POST /v1/appointments`, then **Find Traces**. A booking shows
+  `booking.Book`, `booking.attempt`, `LockDealershipDay` and
+  `BookAppointment`.
+- **Prometheus** (<http://localhost:9090>): `service_scheduler_bookings_total`
+  now shows the `created` and `no_capacity` outcomes from step 4. Counters
+  restart from zero whenever the API container restarts.
+
+### 7. Stop
+
+```sh
+make down                 # keeps the database
+docker compose --profile observability down -v   # also deletes the database
+```
+
 ## Observability
 
 ```sh
@@ -190,6 +320,10 @@ the API in Docker already sends its traces to the collector.
 - **Logs:** `docker compose logs -f api`. JSON, one line per request and per
   booking, each carrying `trace_id` and `request_id`. Customer names, emails
   and phone numbers are never logged.
+
+Probe requests (`/metrics`, `/healthz`, `/readyz`) are neither traced nor
+access-logged, because Prometheus and orchestrators poll them every few
+seconds; they still count in `http_server_request_duration_seconds`.
 
 ## Assumptions
 
@@ -297,7 +431,7 @@ Each was fixed and recorded.
 
 **Results.**
 
-- 209 passing tests and subtests, under the race detector, with 94.2%
+- 211 passing tests and subtests, under the race detector, with 94.1%
   statement coverage.
 - Real-database integration tests for both exclusion constraints, the
   booking query and readiness.
