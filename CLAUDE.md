@@ -65,10 +65,18 @@ cmd/server ──> internal/api ──> internal/booking ──┬──> intern
 - **Time.** Store `timestamptz` in UTC. Intervals are half-open `[start, end)`.
   Opening hours are local to the dealership's IANA timezone.
 - **Tests.** Unit tests sit beside the code. Integration tests carry
-  `//go:build integration` and use testcontainers-go with `postgres:18`.
+  `//go:build integration` and use testcontainers-go with `postgres:18`
+  through `internal/dbtest`: `dbtest.Pool(t)` / `dbtest.DSN(t)` start one
+  container per test binary and apply the embedded migrations
+  (`migrations.FS`). Tests share that database, so each test creates its own
+  rows with fresh UUIDs (see `newFixture` in `internal/db`) and can run in
+  parallel. Never truncate or reuse another test's rows.
   Handler tests go through `contract.do` in `internal/api`, which validates
   every request and response against the OpenAPI document. Name them
   `TestContract_*` so `make test-api` picks them up.
+- **Seed data.** `internal/seed` holds fixed-ID rows, upserted in one
+  transaction by `make seed` (`cmd/seed`), so re-running converges. Use the
+  exported IDs (`seed.DealershipLondon`, ...) in tests and `test/http`.
 - **Logs.** `log/slog` JSON with `*Context` methods. Never log customer names,
   emails or phone numbers.
 - **Tools** are pinned in the Makefile and installed into `./bin` by
@@ -103,6 +111,7 @@ and the coverage gate on push.
 ```
 make setup             # tools into ./bin, git hooks, .env from .env.example
 make up / make down    # api + postgres:18 (COMPOSE_PROFILES=observability for the o11y stack)
+                       # POSTGRES_PORT in .env moves the host port if 5432 is taken
 make migrate           # goose up against DATABASE_URL
 make seed              # idempotent seed data
 make run               # run the API on the host
