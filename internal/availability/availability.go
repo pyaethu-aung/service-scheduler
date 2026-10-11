@@ -12,8 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/pyaethu-aung/service-scheduler/internal/db"
+	"github.com/pyaethu-aung/service-scheduler/internal/observability"
 	"github.com/pyaethu-aung/service-scheduler/internal/slots"
 )
 
@@ -49,17 +52,48 @@ type Service struct {
 	store       db.Querier
 	granularity time.Duration
 	now         func() time.Time
+	recorder    Recorder
 }
+
+// Recorder receives the slots-returned metric (Section 9).
+type Recorder interface {
+	SlotsReturned(n int)
+}
+
+type noRecorder struct{}
+
+func (noRecorder) SlotsReturned(int) {}
 
 // New returns a Service. granularity is the start-time grid step (A7); now
 // is the clock, so past starts can be hidden.
 func New(store db.Querier, granularity time.Duration, now func() time.Time) *Service {
-	return &Service{store: store, granularity: granularity, now: now}
+	return &Service{store: store, granularity: granularity, now: now, recorder: noRecorder{}}
+}
+
+// Instrument sends the slots-returned metric to recorder.
+func (s *Service) Instrument(recorder Recorder) *Service {
+	s.recorder = recorder
+	return s
 }
 
 // Availability returns the free starts for q. A closed day, a past date or
 // a service type nobody here is qualified for gives an empty list.
 func (s *Service) Availability(ctx context.Context, q Query) (Result, error) {
+	ctx, span := observability.Tracer().Start(ctx, "availability.Availability", trace.WithAttributes(
+		attribute.String("dealership_id", q.DealershipID.String()),
+		attribute.String("service_type_id", q.ServiceTypeID.String()),
+	))
+	defer span.End()
+
+	res, err := s.availability(ctx, q)
+	if err == nil {
+		s.recorder.SlotsReturned(len(res.Starts))
+		span.SetAttributes(attribute.Int("slots_returned", len(res.Starts)))
+	}
+	return res, err
+}
+
+func (s *Service) availability(ctx context.Context, q Query) (Result, error) {
 	dealership, err := s.store.GetDealership(ctx, q.DealershipID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Result{}, ErrDealershipNotFound
