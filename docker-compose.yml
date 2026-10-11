@@ -49,7 +49,7 @@ services:
       - jaeger
 
   jaeger:
-    image: jaegertracing/jaeger:2.10.0
+    image: jaegertracing/jaeger:2.22.0
     profiles: [observability]
     ports:
       - "16686:16686" # UI
