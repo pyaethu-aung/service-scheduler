@@ -17,11 +17,11 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: bin
           key: tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
@@ -31,8 +31,8 @@ jobs:
     name: Test (race, integration, coverage)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Unit tests
@@ -41,7 +41,7 @@ jobs:
       # the runner's Docker daemon. Generated code is excluded from the total.
       - name: Unit and integration tests with the coverage gate
         run: make coverage COVERAGE_MIN=85
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage
@@ -52,11 +52,11 @@ jobs:
     name: Generated code and go.mod in sync
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: bin
           key: tools-${{ runner.os }}-${{ hashFiles('Makefile') }}
