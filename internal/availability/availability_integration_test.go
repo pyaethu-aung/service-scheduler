@@ -6,12 +6,10 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/pyaethu-aung/service-scheduler/internal/availability"
 	"github.com/pyaethu-aung/service-scheduler/internal/db"
@@ -29,25 +27,10 @@ var (
 	longAgo     = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
 )
 
-var (
-	seedOnce sync.Once
-	seedErr  error
-)
-
-// store returns queries over the shared, seeded database. Tests that book
-// appointments use their own dates, so they never affect each other.
+// store returns queries over the shared, seeded database.
 func store(t *testing.T) *db.Queries {
 	t.Helper()
-	pool := dbtest.Pool(t)
-	seedOnce.Do(func() {
-		seedErr = pgx.BeginFunc(context.Background(), pool, func(tx pgx.Tx) error {
-			return seed.Run(context.Background(), db.New(tx))
-		})
-	})
-	if seedErr != nil {
-		t.Fatalf("seed: %v", seedErr)
-	}
-	return db.New(pool)
+	return db.New(dbtest.SeededPool(t))
 }
 
 func book(t *testing.T, q *db.Queries, bay, tech uuid.UUID, start, end time.Time) {
