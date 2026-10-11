@@ -6,23 +6,42 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type Querier interface {
+	// Verbatim from docs/system-design.md Section 5.2: picks a free bay and the
+	// least-loaded free qualified technician and inserts in one statement. No
+	// row means none is free; a concurrent winner surfaces as 23P01 from the
+	// exclusion constraints. day_start and day_end bound the local day used to
+	// rank technicians by booked time.
+	BookAppointment(ctx context.Context, arg BookAppointmentParams) (Appointment, error)
 	// Moves the row out of the partial exclusion constraints, which frees its
 	// bay and technician. Cancelling twice keeps the first cancelled_at.
 	CancelAppointment(ctx context.Context, id uuid.UUID) (Appointment, error)
+	// Records the key in the booking transaction. An expired row with the same
+	// key is replaced; a live one is kept and 0 rows are affected, which means a
+	// concurrent request with the same key won.
+	ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyKeyParams) (int64, error)
 	CountReferenceData(ctx context.Context) (CountReferenceDataRow, error)
 	// Inserts an appointment on an explicit bay and technician. The exclusion
 	// constraints reject any overlap with a confirmed appointment (23P01).
 	CreateAppointment(ctx context.Context, arg CreateAppointmentParams) (Appointment, error)
+	DeleteExpiredIdempotencyKeys(ctx context.Context, liveSince time.Time) (int64, error)
+	GetAppointmentDetails(ctx context.Context, id uuid.UUID) (GetAppointmentDetailsRow, error)
+	GetCustomer(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	// Read path for availability (docs/system-design.md Section 5.1).
 	GetDealership(ctx context.Context, id uuid.UUID) (GetDealershipRow, error)
+	// Keys created before live_since have expired and are treated as absent.
+	GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyParams) (IdempotencyKey, error)
 	// No row means the dealership is closed on that weekday (0 = Sunday).
 	GetOpeningHours(ctx context.Context, arg GetOpeningHoursParams) (GetOpeningHoursRow, error)
 	GetServiceType(ctx context.Context, id uuid.UUID) (GetServiceTypeRow, error)
+	GetVehicle(ctx context.Context, id uuid.UUID) (GetVehicleRow, error)
+	// Same predicate as BookAppointment's free_bay, to explain a 409.
+	HasFreeBay(ctx context.Context, arg HasFreeBayParams) (bool, error)
 	ListActiveBayIDs(ctx context.Context, dealershipID uuid.UUID) ([]uuid.UUID, error)
 	// Confirmed appointments at the dealership overlapping [window_start,
 	// window_end). Served by the partial GiST index on (dealership_id, period).
