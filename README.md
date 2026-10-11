@@ -220,17 +220,105 @@ Known limitations of this build:
 
 ## AI Collaboration Narrative
 
+This service was built with an AI coding agent (Claude Code), directed and
+reviewed by the engineer. Every gate failure, contract-test failure and
+significant review finding the agent hit is recorded, with how it was caught
+and fixed, in [docs/ai-log.md](docs/ai-log.md). This section summarises it.
+
 ### Strategy
 
-TODO
+**Decisions stayed with the engineer.** The engineer wrote the design first
+([docs/system-design.md](docs/system-design.md)) and fixed the choices that
+matter before any code existed. That covered the stack, exclusion constraints
+as the double-booking guarantee, no Redis, half-open intervals in UTC, and
+system-assigned bays and technicians. The agent documented the rejected
+alternatives (mutex, row lock, advisory lock, Redis lock, `SERIALIZABLE`) but
+did not choose among them.
+
+**Standing rules, written down.** [CLAUDE.md](CLAUDE.md) gave every session
+the same ground rules. Never weaken the exclusion constraints. All SQL goes
+through sqlc. Integration tests use a real PostgreSQL 18, never a mock. The
+concurrency test is protected: if it fails, the agent stops and reports
+rather than changing the test. The layer rules are enforced by the linter,
+not just written down.
+
+**Small, gated, reviewed steps.** After a bootstrap commit set up the
+tooling, the work ran as five slices, one agent run and one pull request each
+(PRs #6 to #10), then a final README PR (#11). Each slice went contract
+first, then implementation with tests, the quality gates, a live check
+against the running service, and a self-review. The agent opened each PR and
+stopped; the engineer reviewed and merged every one.
+
+**Gaps escalated, not guessed.** Wherever the design left a choice open, the
+agent stopped and asked. The engineer decided 15 such points, including the
+availability response shape, how DST days build the slot grid, the 409
+suggestion rule, the `422`-for-malformed-booking rule, `403` for a missing API
+key, and the fix for the deadlock described below.
 
 ### Verification
 
-TODO
+**The gates block every merge.** Each change passes build, vet, lint and
+race-enabled unit tests. Integration tests run against PostgreSQL 18 through
+testcontainers, under an 85% coverage gate with generated code excluded. A
+check also confirms that the sqlc and oapi-codegen output matches its
+sources. CI runs the same gates plus govulncheck, and git hooks run them
+on each commit and push.
+
+**Every endpoint is checked against the contract.** Handler tests validate
+each request and response against the OpenAPI document. Each slice also ran
+live requests against the real service and database. A final pass cloned
+the repository fresh and followed only the README.
+
+**The concurrency test found a real defect.** The first version of the
+50-request test passed but proved nothing: its own counter showed zero races,
+because requests queued behind connection setup. Once the requests truly
+raced, about one run in five failed. PostgreSQL reported some lost races as
+deadlocks (`40P01`) rather than exclusion violations (`23P01`), and the
+booking code answered them with `500`. The database never held two
+confirmed bookings, but the responses were wrong. The agent stopped,
+diagnosed the cause from captured logs and measured candidate fixes. The
+engineer's first choice, retrying deadlocks, still failed one run in four.
+Adding a per-dealership-day advisory lock passed 30 of 30. The design
+document was updated to match.
+
+**The checks were themselves checked.** Several findings were weaknesses in
+the scaffold's own tooling, not the feature code:
+
+- The linter never saw integration tests.
+- The contract tests ignored the `uuid` and `date` formats.
+- The generated-code check flagged hand-written files.
+- Metrics labelled every 403 as `unmatched`.
+
+Each was fixed and recorded.
+
+<!-- Pyae: add what you caught yourself in PR review (if anything), with the PR number. The AI log covers only what the agent's gates and checks found. -->
 
 ### Quality
 
-TODO
+**Results.**
+
+- 209 passing tests and subtests, under the race detector, with 94.2%
+  statement coverage.
+- Real-database integration tests for both exclusion constraints, the
+  booking query and readiness.
+- A contract test for every documented status code.
+- Logs pinned to IDs only by a test.
+- SQL spans named after queries, never SQL text.
+
+**The agent's own mistakes are logged too.** The AI log records 17 findings
+across the work, not only the successes. They include:
+
+- A unit test with a wrong expected value.
+- Commits that slipped past a failing lint run or a rejected pre-commit hook,
+  because the outcome was hidden inside a shell pipeline. Both were caught
+  and fixed before pushing.
+- Two bugs in the agent's own curl scripts.
+- A vulnerable `golang.org/x/net` brought in by the tracing exporter, which
+  govulncheck caught before the PR.
+
+**Known limits.** These are listed under
+[Limitations and future work](#limitations-and-future-work), along with the
+deferred items from each PR.
 
 ## License
 
