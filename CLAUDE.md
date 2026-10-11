@@ -70,10 +70,22 @@ cmd/server ──> internal/api ──> internal/booking ──┬──> intern
   container per test binary and apply the embedded migrations
   (`migrations.FS`). Tests share that database, so each test creates its own
   rows with fresh UUIDs (see `newFixture` in `internal/db`) and can run in
-  parallel. Never truncate or reuse another test's rows.
+  parallel. Never truncate or reuse another test's rows. `dbtest.SeededPool(t)`
+  also loads the seed data once; tests that book appointments on it must use
+  a date no other test in the package uses.
   Handler tests go through `contract.do` in `internal/api`, which validates
-  every request and response against the OpenAPI document. Name them
-  `TestContract_*` so `make test-api` picks them up.
+  every request and response against the OpenAPI document, including the
+  `uuid` and `date` formats. Use `contract.doInvalid` for requests that break
+  the contract on purpose (400 cases). Name them `TestContract_*` so
+  `make test-api` picks them up.
+- **Errors.** Services return sentinel errors (`availability.ErrDealershipNotFound`);
+  handlers map them to the documented problem+json responses. Binding errors
+  become 400 problem+json and unexpected errors a bare 500 problem+json with
+  the cause logged (`internal/api/problem.go`).
+- **Time in the slot engine.** `internal/slots` steps through real instants
+  from the opening instant: spring-forward gaps are skipped, the fall-back
+  hour is offered twice. Booking must validate starts with `slots.OnGrid` so
+  it accepts exactly what availability offers.
 - **Seed data.** `internal/seed` holds fixed-ID rows, upserted in one
   transaction by `make seed` (`cmd/seed`), so re-running converges. Use the
   exported IDs (`seed.DealershipLondon`, ...) in tests and `test/http`.
