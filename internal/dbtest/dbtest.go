@@ -13,11 +13,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver for goose
 	"github.com/pressly/goose/v3"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/pyaethu-aung/service-scheduler/internal/db"
+	"github.com/pyaethu-aung/service-scheduler/internal/seed"
 	"github.com/pyaethu-aung/service-scheduler/migrations"
 )
 
@@ -28,6 +31,9 @@ var (
 	once     sync.Once
 	dsn      string
 	startErr error
+
+	seedOnce sync.Once
+	seedErr  error
 )
 
 // DSN returns the connection string of the shared, migrated database,
@@ -50,6 +56,23 @@ func Pool(t testing.TB) *pgxpool.Pool {
 		t.Fatalf("dbtest: pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
+	return pool
+}
+
+// SeededPool is Pool with the internal/seed data loaded once per test
+// binary. Tests that book appointments must use dates no other test in the
+// package uses, so the shared seed rows stay predictable.
+func SeededPool(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	pool := Pool(t)
+	seedOnce.Do(func() {
+		seedErr = pgx.BeginFunc(context.Background(), pool, func(tx pgx.Tx) error {
+			return seed.Run(context.Background(), db.New(tx))
+		})
+	})
+	if seedErr != nil {
+		t.Fatalf("dbtest: seed: %v", seedErr)
+	}
 	return pool
 }
 
