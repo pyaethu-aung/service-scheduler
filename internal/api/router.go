@@ -14,6 +14,13 @@ func NewRouter(srv *Server) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 
-	HandlerFromMux(NewStrictHandler(srv, nil), r)
+	strict := NewStrictHandlerWithOptions(srv, nil, StrictHTTPServerOptions{
+		RequestErrorHandlerFunc:  badRequest,
+		ResponseErrorHandlerFunc: internalError(srv.logger),
+	})
+	HandlerWithOptions(strict, ChiServerOptions{
+		BaseRouter:       r,
+		ErrorHandlerFunc: badRequest, // parameter binding errors
+	})
 	return r
 }

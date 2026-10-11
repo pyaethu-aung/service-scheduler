@@ -23,11 +23,14 @@ var (
 	ErrServiceTypeNotFound = errors.New("service type not found")
 )
 
+// Date is a local calendar date at the dealership.
+type Date = slots.Date
+
 // Query asks for the free starts of one service type on one local date.
 type Query struct {
 	DealershipID  uuid.UUID
 	ServiceTypeID uuid.UUID
-	Date          slots.Date
+	Date          Date
 }
 
 // Result is the answer to a Query. Starts are in UTC, ascending, and never
@@ -35,7 +38,7 @@ type Query struct {
 type Result struct {
 	DealershipID  uuid.UUID
 	ServiceTypeID uuid.UUID
-	Date          slots.Date
+	Date          Date
 	Timezone      string
 	Duration      time.Duration
 	Starts        []time.Time
