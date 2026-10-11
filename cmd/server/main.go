@@ -17,6 +17,7 @@ import (
 
 	"github.com/pyaethu-aung/service-scheduler/internal/api"
 	"github.com/pyaethu-aung/service-scheduler/internal/availability"
+	"github.com/pyaethu-aung/service-scheduler/internal/booking"
 	"github.com/pyaethu-aung/service-scheduler/internal/config"
 	"github.com/pyaethu-aung/service-scheduler/internal/db"
 )
@@ -61,8 +62,23 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, r
 		return fmt.Errorf("listen: %w", err)
 	}
 
+	avail := availability.New(db.New(pool), cfg.SlotGranularity, time.Now)
+	bookings := booking.New(booking.NewPGStore(pool), avail, cfg.SlotGranularity, time.Now)
+
+	// Expire idempotency keys in the background; stop before the pool closes.
+	cleanupCtx, stopCleanup := context.WithCancel(ctx)
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		bookings.RunKeyCleanup(cleanupCtx, booking.CleanupInterval, logger)
+	}()
+	defer func() {
+		stopCleanup()
+		<-cleanupDone
+	}()
+
 	srv := &http.Server{
-		Handler:           api.NewRouter(api.NewServer(availability.New(db.New(pool), cfg.SlotGranularity, time.Now), logger)),
+		Handler:           api.NewRouter(api.NewServer(avail, bookings, logger)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

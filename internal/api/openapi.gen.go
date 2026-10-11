@@ -23,6 +23,24 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AppointmentStatus.
+const (
+	AppointmentStatusCancelled AppointmentStatus = "cancelled"
+	AppointmentStatusConfirmed AppointmentStatus = "confirmed"
+)
+
+// Valid indicates whether the value is a known member of the AppointmentStatus enum.
+func (e AppointmentStatus) Valid() bool {
+	switch e {
+	case AppointmentStatusCancelled:
+		return true
+	case AppointmentStatusConfirmed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatus.
 const (
 	HealthStatusOk HealthStatus = "ok"
@@ -37,6 +55,73 @@ func (e HealthStatus) Valid() bool {
 		return false
 	}
 }
+
+// Defines values for SlotUnavailableProblemReason.
+const (
+	SlotUnavailableProblemReasonNoBayAvailable        SlotUnavailableProblemReason = "no_bay_available"
+	SlotUnavailableProblemReasonNoTechnicianAvailable SlotUnavailableProblemReason = "no_technician_available"
+)
+
+// Valid indicates whether the value is a known member of the SlotUnavailableProblemReason enum.
+func (e SlotUnavailableProblemReason) Valid() bool {
+	switch e {
+	case SlotUnavailableProblemReasonNoBayAvailable:
+		return true
+	case SlotUnavailableProblemReasonNoTechnicianAvailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlotUnavailableProblemStatus.
+const (
+	SlotUnavailableProblemStatusN409 SlotUnavailableProblemStatus = 409
+)
+
+// Valid indicates whether the value is a known member of the SlotUnavailableProblemStatus enum.
+func (e SlotUnavailableProblemStatus) Valid() bool {
+	switch e {
+	case SlotUnavailableProblemStatusN409:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ValidationProblemStatus.
+const (
+	ValidationProblemStatusN422 ValidationProblemStatus = 422
+)
+
+// Valid indicates whether the value is a known member of the ValidationProblemStatus enum.
+func (e ValidationProblemStatus) Valid() bool {
+	switch e {
+	case ValidationProblemStatusN422:
+		return true
+	default:
+		return false
+	}
+}
+
+// Appointment defines model for Appointment.
+type Appointment struct {
+	Bay        ResourceRef        `json:"bay"`
+	CustomerId openapi_types.UUID `json:"customerId"`
+	Dealership DealershipRef      `json:"dealership"`
+
+	// EndsAt Exclusive end; the appointment holds [startsAt, endsAt).
+	EndsAt      time.Time          `json:"endsAt"`
+	Id          openapi_types.UUID `json:"id"`
+	ServiceType ServiceTypeRef     `json:"serviceType"`
+	StartsAt    time.Time          `json:"startsAt"`
+	Status      AppointmentStatus  `json:"status"`
+	Technician  ResourceRef        `json:"technician"`
+	VehicleId   openapi_types.UUID `json:"vehicleId"`
+}
+
+// AppointmentStatus defines model for Appointment.Status.
+type AppointmentStatus string
 
 // Availability defines model for Availability.
 type Availability struct {
@@ -59,6 +144,27 @@ type Availability struct {
 	Timezone string `json:"timezone"`
 }
 
+// BookingRequest defines model for BookingRequest.
+type BookingRequest struct {
+	CustomerId    openapi_types.UUID `json:"customerId"`
+	DealershipId  openapi_types.UUID `json:"dealershipId"`
+	ServiceTypeId openapi_types.UUID `json:"serviceTypeId"`
+
+	// StartsAt Requested start, any offset; stored and returned in UTC.
+	//
+	// Example: 2026-10-20T09:00:00+07:00
+	StartsAt time.Time `json:"startsAt"`
+
+	// VehicleId Must belong to the customer.
+	VehicleId openapi_types.UUID `json:"vehicleId"`
+}
+
+// DealershipRef defines model for DealershipRef.
+type DealershipRef struct {
+	Id   openapi_types.UUID `json:"id"`
+	Name string             `json:"name"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -66,6 +172,17 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// InvalidParam defines model for InvalidParam.
+type InvalidParam struct {
+	// Name Body field, header or parameter name.
+	//
+	// Example: startsAt
+	Name string `json:"name"`
+
+	// Reason Example: not on the 15-minute grid
+	Reason string `json:"reason"`
+}
 
 // Problem RFC 9457 problem details. Extension members may be added per problem type.
 type Problem struct {
@@ -88,11 +205,68 @@ type Problem struct {
 	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
+// ResourceRef defines model for ResourceRef.
+type ResourceRef struct {
+	Id   openapi_types.UUID `json:"id"`
+	Name string             `json:"name"`
+}
+
+// ServiceTypeRef defines model for ServiceTypeRef.
+type ServiceTypeRef struct {
+	// Code Example: OIL_CHANGE
+	Code            string             `json:"code"`
+	DurationMinutes int                `json:"durationMinutes"`
+	Id              openapi_types.UUID `json:"id"`
+}
+
+// SlotUnavailableProblem RFC 9457 problem for a 409, with the reason and nearby free starts.
+type SlotUnavailableProblem struct {
+	Detail *string                      `json:"detail,omitempty"`
+	Reason SlotUnavailableProblemReason `json:"reason"`
+	Status SlotUnavailableProblemStatus `json:"status"`
+
+	// SuggestedStarts Up to three free starts on the same local day nearest the requested one, ascending, in UTC.
+	SuggestedStarts []time.Time `json:"suggestedStarts"`
+	Title           string      `json:"title"`
+
+	// Type Example: https://service-scheduler.example/problems/slot-unavailable
+	Type string `json:"type"`
+}
+
+// SlotUnavailableProblemReason defines model for SlotUnavailableProblem.Reason.
+type SlotUnavailableProblemReason string
+
+// SlotUnavailableProblemStatus defines model for SlotUnavailableProblem.Status.
+type SlotUnavailableProblemStatus int
+
+// ValidationProblem RFC 9457 problem for a 422, listing every invalid parameter.
+type ValidationProblem struct {
+	Detail        *string                 `json:"detail,omitempty"`
+	InvalidParams []InvalidParam          `json:"invalidParams"`
+	Status        ValidationProblemStatus `json:"status"`
+	Title         string                  `json:"title"`
+
+	// Type Example: https://service-scheduler.example/problems/validation-failed
+	Type string `json:"type"`
+}
+
+// ValidationProblemStatus defines model for ValidationProblem.Status.
+type ValidationProblemStatus int
+
 // BadRequest RFC 9457 problem details. Extension members may be added per problem type.
 type BadRequest = Problem
 
 // NotFound RFC 9457 problem details. Extension members may be added per problem type.
 type NotFound = Problem
+
+// ValidationFailed RFC 9457 problem for a 422, listing every invalid parameter.
+type ValidationFailed = ValidationProblem
+
+// BookAppointmentParams defines parameters for BookAppointment.
+type BookAppointmentParams struct {
+	// IdempotencyKey Client-chosen key, unique per intended booking, kept for 24 hours.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
 
 // GetAvailabilityParams defines parameters for GetAvailability.
 type GetAvailabilityParams struct {
@@ -101,6 +275,9 @@ type GetAvailabilityParams struct {
 	// Date Local calendar date at the dealership (YYYY-MM-DD).
 	Date openapi_types.Date `form:"date" json:"date"`
 }
+
+// BookAppointmentJSONRequestBody defines body for BookAppointment for application/json ContentType.
+type BookAppointmentJSONRequestBody = BookingRequest
 
 // Getter for additional properties for Problem. Returns the specified
 // element and whether it was found
@@ -229,6 +406,9 @@ type ServerInterface interface {
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
+	// BookAppointment Book an appointment
+	// (POST /v1/appointments)
+	BookAppointment(w http.ResponseWriter, r *http.Request, params BookAppointmentParams)
 	// GetAvailability Free start times for a service type on a date
 	// (GET /v1/dealerships/{dealershipId}/availability)
 	GetAvailability(w http.ResponseWriter, r *http.Request, dealershipId openapi_types.UUID, params GetAvailabilityParams)
@@ -241,6 +421,12 @@ type Unimplemented struct{}
 // GetHealthz Liveness probe
 // (GET /healthz)
 func (_ Unimplemented) GetHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// BookAppointment Book an appointment
+// (POST /v1/appointments)
+func (_ Unimplemented) BookAppointment(w http.ResponseWriter, r *http.Request, params BookAppointmentParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -264,6 +450,51 @@ func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BookAppointment operation middleware
+func (siw *ServerInterfaceWrapper) BookAppointment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params BookAppointmentParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err := fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BookAppointment(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -442,6 +673,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/appointments", wrapper.BookAppointment)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/dealerships/{dealershipId}/availability", wrapper.GetAvailability)
 	})
 	r.Group(func(r chi.Router) {
@@ -454,6 +688,8 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 type BadRequestApplicationProblemPlusJSONResponse Problem
 
 type NotFoundApplicationProblemPlusJSONResponse Problem
+
+type ValidationFailedApplicationProblemPlusJSONResponse ValidationProblem
 
 type GetHealthzRequestObject struct {
 }
@@ -472,6 +708,89 @@ func (response GetHealthz200JSONResponse) VisitGetHealthzResponse(w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BookAppointmentRequestObject struct {
+	Params BookAppointmentParams
+	Body   *BookAppointmentJSONRequestBody
+}
+
+type BookAppointmentResponseObject interface {
+	VisitBookAppointmentResponse(w http.ResponseWriter) error
+}
+
+type BookAppointment200JSONResponse Appointment
+
+func (response BookAppointment200JSONResponse) VisitBookAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BookAppointment201JSONResponse Appointment
+
+func (response BookAppointment201JSONResponse) VisitBookAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BookAppointment404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response BookAppointment404ApplicationProblemPlusJSONResponse) VisitBookAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BookAppointment409ApplicationProblemPlusJSONResponse SlotUnavailableProblem
+
+func (response BookAppointment409ApplicationProblemPlusJSONResponse) VisitBookAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BookAppointment422ApplicationProblemPlusJSONResponse struct {
+	ValidationFailedApplicationProblemPlusJSONResponse
+}
+
+func (response BookAppointment422ApplicationProblemPlusJSONResponse) VisitBookAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -536,6 +855,9 @@ type StrictServerInterface interface {
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
+	// BookAppointment Book an appointment
+	// (POST /v1/appointments)
+	BookAppointment(ctx context.Context, request BookAppointmentRequestObject) (BookAppointmentResponseObject, error)
 	// GetAvailability Free start times for a service type on a date
 	// (GET /v1/dealerships/{dealershipId}/availability)
 	GetAvailability(ctx context.Context, request GetAvailabilityRequestObject) (GetAvailabilityResponseObject, error)
@@ -604,6 +926,39 @@ func (sh *strictHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// BookAppointment operation middleware
+func (sh *strictHandler) BookAppointment(w http.ResponseWriter, r *http.Request, params BookAppointmentParams) {
+	var request BookAppointmentRequestObject
+
+	request.Params = params
+
+	var body BookAppointmentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BookAppointment(ctx, request.(BookAppointmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BookAppointment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BookAppointmentResponseObject); ok {
+		if err := validResponse.VisitBookAppointmentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetAvailability operation middleware
 func (sh *strictHandler) GetAvailability(w http.ResponseWriter, r *http.Request, dealershipId openapi_types.UUID, params GetAvailabilityParams) {
 	var request GetAvailabilityRequestObject
@@ -636,34 +991,54 @@ func (sh *strictHandler) GetAvailability(w http.ResponseWriter, r *http.Request,
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"//8=",
+	"zFprc9s21v4rZ/i+MxtPKYlW7KZWPjm3xtMkm3Gcnc1GnvSIPBJRkwADgLbZjv/7zgHvIm3L2bS732SJ",
+	"IM71eZ4D+A8vVGmmJElrvMUfniaTKWnI/fEMo1P6mpOx/FeopCXpPmKWJSJEK5ScZVqtEkp/+M0oyb+Z",
+	"MKYU+dP/a1p7C+//Zu0Ws/JXM3tfrvJubm58LyITapHx67yFdxYT6HJbEAZSTNZKpxTBI5Qg5CUmIoKP",
+	"H09egNIQoSWfPyCkwhghN5ChxpQs6b2pd+N775R9pXIZ/ZUuHIOmNWmSIUWgyahchwSRIgNSWaBrYawz",
+	"7h/sjDPiFYqEvr+R7QbfEnGlYaUJLwwgrJS64PDqPCkjbmNaypOI0kxZkmEx+YUKuEIDmGjCqIDcUARX",
+	"wsaAEIm1C4iFlYqK6VJ6bEZlJTtxnGVKSJtWnmdaZaStKAtxhcV9jp5WUT6lNQc2zI1VKekTF1J2B623",
+	"8PJcRJ7v2SIjb+EZq4XceC4emJA2scju2+dF82S1E8nIHDub+0F9eR0muRGXBCSjpxwtwNZHiFUSGfhs",
+	"LGprjq0P5Xv2pp7fmsvVPbEipTGbxW6uGdKXIqQz9/3dvn1oH62cq83r7XSnVcaizV3SSOapt/jM9bwW",
+	"XE6e74UoQ0q40M9H1loKYylCgfKB2b6kWIQJ7ZTsG9/jWheau+2z5x6pjO742+S1Vxv9aPquLntm9wqv",
+	"a1frrlr9RqFlq48vUSS4EomwxbDmsfw1oQ/OpmGBvdJE4AwGToYBIeHj2XMf0IQkIyE3XEt0jWmWELs6",
+	"D+Y/TvaDyTw4C54sgmARBP/y/K2v9w/d1+e+JyylZvfEV1+g1li4lkJLQ6M7UEMRJCrExGH4oOzv7tJd",
+	"2zrXDvveCplbGolhVfFQP/gUCMO4iqomzjbVXepXX//QPO2aNRVSpFzp+40BQlrakN7qvh1t5vj+ruQt",
+	"sWtD8DcDJ8fvjqF+3oerWISxAxoOICN5GV+reoXgvcy50GZvlIyUvLdBekHfdshvclVbPQy6PyjlsWZ4",
+	"VtJLR2/02+GbAf3kwTC564oONvYTddoUeFU4KAtQ67Uh+xSMVZoiQMnKwOZaUlR1bj9L3bY8Krv1B9e2",
+	"OxNEDxX7Fr7NjYUVJUpuwCpXM3WAe524E4RuVcgtCDgsnSaAY/XQ59lBOexIfhJT10g7cIB7dMyS14SJ",
+	"jYcmDJlOXYzQ2tZe1aqxjU5Kbfue9etwu9qVfiKfqaiAtaAk8iEmjEizNGskMPCqfl11KG4QLk1Yqcv2",
+	"eRasSroS2T+cpK6pYaN3qAtncfPSMY9rTcp0F0WCfcLkfcdtq3PaVqunr57D0cHhE6gUMURkUSRmCi+v",
+	"LUkjlISU0hVplrIFrAgwiiiCjHSzhk3huPRjXL5pGOXXeYpywqqWUQzoOktQOpADk1Eo1iIs20gYUGGY",
+	"ayf9p6OqTRrLImi4ycfTk3ZsABGRtGJdsOQeeW9b+VpMmlV3C7Itn87O3kP5I4QqIlg7TT/YKcXrkt8O",
+	"j466bBcEY3xnhU1GfPsQK8bBuB9Hk6cpaoZGV17bublFYjwkbsOXtoUdW5uZxWxWwdKEtWWUJ6Sn1TP1",
+	"yGVmJlF2ksuGxx6QgK2esKVwLMPk34UGXYn734S/raFgSMwqoj5i/P3kzZfnr4/f/fxyR012t4QS36rq",
+	"nWXDDUedTJT92Oa3g0v3YM/aHT0cBEd+Oelap28Z8BzDS0K9KmDdSHVzF+jchccVxUj1ZYXFl24lSvWl",
+	"nUA6v5zvMp0dBEfno7o132ychLlt+viYlYjHnnXcq6nCYEqNvC9cHMjYKjy1OnKqtZlW/I4MeuDskeL1",
+	"Sbni8XAQaSDpVjz5n8SEJvvDZIxV8PCgZ+finc99SISxDJl0SbpoTtkaHfGgqhUdHVOiVZ3Nu0b6nvq5",
+	"cUxT5XR/mNNhHc/n53fy0fdN/mUT7cm6PLj77tnvR3GYcjezhLkWtvjAIaTqGE38QsVxXgpWwWkvZWEN",
+	"8Qvvn5Pj9yeTX6hoTUO3qjwaFHKtxnSmujBQRaZ7kGVcFYWoO6Op4a42YiO5orCCh3LpUq6wcNCI8DXH",
+	"RKwFRdDiV6VCCK5ilTSrmol7Ci+IX7xYykiFZmYKYymdRO7LaRpN4YwVTKTC3J2yCVPONkpajSFPXzzR",
+	"a+AK0WsMySwlaoINSdLImLTWKgVhSzRXmIkJ08iG5HTJrZiIkKShVpB7b0/OPN/LddKpIJWRLNl7qvRm",
+	"Vi0yM362Lcrm9OFDXWhw/P7EDU3alGEPpvvTgJfwGzET3sJ7PA2mj7kd0cYu5bPYDSi/8+cNjY6jPGYa",
+	"mAcBXMUioVoYhWQMh8hFWW6AJeEUXtTH1Fbl7XkCrtA4AcUg4HLBc6X3M9nX1fZ+//JgHgR3nGY/7BS7",
+	"GsFuObrueIKJuKRprzm8xedzhlAnNb2F90ZckuTHuZld5+HGcCOWYfTOefHscn/WLXIne5SxtzUGjrUG",
+	"PHp1us8s+er08R5XJkFZr1V3mKo3lrJeXPcGxzwhNHaSKOTR5f5WaV/SnmW50seECyuMlTLE9JwUJUE3",
+	"B4fTpVzKs+artDwaYDLm59a5zTX5Da8nyrrpz28M3drerV8LC0IaEZW11ju14lLmaotVrp1eULKSCksZ",
+	"YTGFsysFVJ6eK8m9a6xGwVBT2VSXI6R4QRCpnIeJ6n5iKUWaKWPEKqGngM29ho3RQuJigKAxdOdjmqzm",
+	"oOYdMePOUpey8o5lnLkiTRGLvBIVBqKuXOPiWB39GGBUEfXliIVVAb9u3ZX8ugBNGaEtUfKCCvf6pWz0",
+	"04qHe/5OSJgfVAHTVTfzU0qLjZCY9KpOSBDWLGU5xFk34xE8mgfBnnuZym1zmYMbFPJpx44a+XAp+1c2",
+	"HK6D+XwKb5vbId319WA+BzRwRUlSImUfJ7hNulc8jF+VtuDm2+6q54kgaSdhrAxJDo0PuRRfc3JDPKO3",
+	"5Lao3PDhgjLr+qEOkxORY+y3lQSvS8blaUMLSa00+HG9Hx7h4XwSrJ7Q5CDcX0+OMKDJPPppvb96Ej6m",
+	"g4NyVn5DcsPkOz88dBqm/nt/qAPOy73J2GcqKr4bWG6dpN70BQf7ePMnQnU3ySN4fUpZgm7iRwmEOhGk",
+	"mx5tJihX/dtXi9yRXInDuzQ0XLeCWevKXavOg/2/yiGONkVu14Pg4LaXNeGeNdfRbsHRd7/wvWWSHbH8",
+	"nXJ8ozRINU4wwpQgVxNNO7k53nAuzOf3+zy45Xb83DAyh5DLAXv4UNNyj4Ybcu6Izdkf3QPomxluXauN",
+	"aqI3goGrT4R9MiovUdBW1yoIrXBtQ7SUbeDqKNVEyO3uoHGlbNwPZE/cLmXN2CwYDvam8KFjEr9gyL0t",
+	"ty7l7eTqb5P42KVDzf48AToJFV0Ko3SxYFHjDDGxupLcZM6HECXLA4sXxB/WSld2hA6zHSabVh3UTEMy",
+	"cnkETZMwpvDCTOEYQmbkCCIsfEDI0FjWAM2/dPRCKVW3NmPSjsL78a/JkTNDaWYL59YYIf1Mtnf/OiAk",
+	"xx4sslvu2LrouJ047j2sql7/NSddtO/fviD5jzbYqndX0iEmJCPUTW33xRk8+vTp06fJ27eTFy/2Ggbd",
+	"MrK68NuFNdsrrPtvd0s2/LNIqZvpESjcvkr3oZKQBUglK6Qr7bkb6Tr/MfVwQuiB4uB2fz3sCCUBoQ5n",
+	"DZddV89vtiah/gHB53OOejkSj6mwsmgiuqREZeVE4xS3ziX3p/ucZ3u98Xcxmzn4jJWxi5+CnwLv5vzm",
+	"3wEAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 )
@@ -18,18 +19,48 @@ func newProblem(status int, slug, title, detail string) Problem {
 	return p
 }
 
-// writeProblem writes p as application/problem+json. It serves the paths
-// the generated handlers do not: request binding errors and unexpected
-// handler errors.
-func writeProblem(w http.ResponseWriter, p Problem) {
+// writeProblem writes body as application/problem+json with status. It
+// serves the paths the generated handlers do not: request binding errors and
+// unexpected handler errors.
+func writeProblem(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(p.Status)
-	_ = json.NewEncoder(w).Encode(p)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
-// badRequest handles malformed parameters and bodies.
-func badRequest(w http.ResponseWriter, _ *http.Request, err error) {
-	writeProblem(w, newProblem(http.StatusBadRequest, "invalid-request", "The request is invalid", err.Error()))
+// requestError handles malformed parameters and bodies. The booking
+// contract has no 400 (Section 7), so POST /v1/appointments answers 422
+// with the offending parameter; every other route answers 400.
+func requestError(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/appointments" {
+		writeProblem(w, http.StatusUnprocessableEntity,
+			validationProblem(InvalidParam{Name: paramName(err), Reason: err.Error()}))
+		return
+	}
+	writeProblem(w, http.StatusBadRequest,
+		newProblem(http.StatusBadRequest, "invalid-request", "The request is invalid", err.Error()))
+}
+
+// paramName names the parameter or body field a binding error is about,
+// or "body" when the JSON body as a whole could not be decoded.
+func paramName(err error) string {
+	var (
+		required *RequiredHeaderError
+		format   *InvalidParamFormatError
+		param    *RequiredParamError
+		typed    *json.UnmarshalTypeError
+	)
+	switch {
+	case errors.As(err, &required):
+		return required.ParamName
+	case errors.As(err, &format):
+		return format.ParamName
+	case errors.As(err, &param):
+		return param.ParamName
+	case errors.As(err, &typed) && typed.Field != "":
+		return typed.Field
+	}
+	return "body"
 }
 
 // internalError logs an unexpected handler error and returns a 500 whose
@@ -38,6 +69,7 @@ func internalError(logger *slog.Logger) func(http.ResponseWriter, *http.Request,
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		logger.ErrorContext(r.Context(), "request failed",
 			"method", r.Method, "path", r.URL.Path, "error", err)
-		writeProblem(w, newProblem(http.StatusInternalServerError, "internal", "Internal server error", ""))
+		writeProblem(w, http.StatusInternalServerError,
+			newProblem(http.StatusInternalServerError, "internal", "Internal server error", ""))
 	}
 }
