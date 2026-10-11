@@ -1,5 +1,10 @@
 version: "2"
 
+run:
+  # Lint integration tests too; without the tag they are invisible to every linter.
+  build-tags:
+    - integration
+
 linters:
   default: standard # errcheck, govet, ineffassign, staticcheck, unused
   enable:
