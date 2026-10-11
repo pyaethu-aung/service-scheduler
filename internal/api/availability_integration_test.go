@@ -22,7 +22,7 @@ func TestContract_AvailabilitySeeded(t *testing.T) {
 
 	longAgo := func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
 	svc := availability.New(db.New(dbtest.SeededPool(t)), 15*time.Minute, longAgo)
-	h := NewRouter(NewServer(svc, nil, slog.New(slog.DiscardHandler)))
+	h := newTestRouter(NewServer(svc, nil, slog.New(slog.DiscardHandler)))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		availabilityURL(seed.DealershipSaigon.String(), seed.ServiceBrakes.String(), "2026-10-24"), nil) // Saturday 08:00-12:00
