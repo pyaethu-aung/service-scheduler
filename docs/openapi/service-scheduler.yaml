@@ -16,6 +16,65 @@ servers:
 security:
   - ApiKeyAuth: []
 paths:
+  /v1/appointments:
+    post:
+      operationId: bookAppointment
+      summary: Book an appointment
+      description: |
+        Books a service appointment (FR1 to FR3). The system assigns a free
+        service bay and the least-loaded qualified technician for the whole
+        service duration; the caller chooses only the start time.
+
+        The start must be in the future, on the slot grid, and the whole
+        service must fit inside the dealership's opening hours on one local
+        day. Two exclusion constraints in the database make double booking
+        impossible; a request that loses a race is retried up to three times
+        and then answered 409 with nearby free start times.
+
+        Requests are idempotent by `Idempotency-Key`: repeating a key with
+        the same body within 24 hours returns the original appointment in its
+        current state (200) without booking again; repeating it with a
+        different body is 422. Malformed requests are 422 as well.
+      tags: [appointments]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-chosen key, unique per intended booking, kept for 24 hours.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+            example: 6f1c9a52-0b7e-4c1f-9a0e-2d8f1b7c3e44
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingRequest"
+      responses:
+        "201":
+          description: Booked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "200":
+          description: Replay of an earlier request with the same Idempotency-Key and body; the appointment as it is now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: No bay or no qualified technician is free for the requested time.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/SlotUnavailableProblem"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
   /v1/dealerships/{dealershipId}/availability:
     get:
       operationId: getAvailability
@@ -91,6 +150,14 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+    ValidationFailed:
+      description: |
+        The request is malformed or breaks a booking rule, or the
+        Idempotency-Key was already used with a different body.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ValidationProblem"
   securitySchemes:
     ApiKeyAuth:
       type: apiKey
@@ -133,6 +200,148 @@ components:
             type: string
             format: date-time
           example: ["2026-10-20T07:00:00Z", "2026-10-20T07:15:00Z"]
+    BookingRequest:
+      type: object
+      required: [dealershipId, customerId, vehicleId, serviceTypeId, startsAt]
+      properties:
+        dealershipId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        vehicleId:
+          type: string
+          format: uuid
+          description: Must belong to the customer.
+        serviceTypeId:
+          type: string
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
+          description: Requested start, any offset; stored and returned in UTC.
+          example: "2026-10-20T09:00:00+07:00"
+    Appointment:
+      type: object
+      required: [id, status, startsAt, endsAt, dealership, serviceType, bay, technician, customerId, vehicleId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [confirmed, cancelled]
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+          description: Exclusive end; the appointment holds [startsAt, endsAt).
+        dealership:
+          $ref: "#/components/schemas/DealershipRef"
+        serviceType:
+          $ref: "#/components/schemas/ServiceTypeRef"
+        bay:
+          $ref: "#/components/schemas/ResourceRef"
+        technician:
+          $ref: "#/components/schemas/ResourceRef"
+        customerId:
+          type: string
+          format: uuid
+        vehicleId:
+          type: string
+          format: uuid
+    DealershipRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    ServiceTypeRef:
+      type: object
+      required: [id, code, durationMinutes]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: OIL_CHANGE
+        durationMinutes:
+          type: integer
+          minimum: 1
+    ResourceRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    SlotUnavailableProblem:
+      type: object
+      description: RFC 9457 problem for a 409, with the reason and nearby free starts.
+      required: [type, title, status, reason, suggestedStarts]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          example: https://service-scheduler.example/problems/slot-unavailable
+        title:
+          type: string
+        status:
+          type: integer
+          enum: [409]
+        detail:
+          type: string
+        reason:
+          type: string
+          enum: [no_bay_available, no_technician_available]
+        suggestedStarts:
+          type: array
+          description: Up to three free starts on the same local day nearest the requested one, ascending, in UTC.
+          maxItems: 3
+          items:
+            type: string
+            format: date-time
+    ValidationProblem:
+      type: object
+      description: RFC 9457 problem for a 422, listing every invalid parameter.
+      required: [type, title, status, invalidParams]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          example: https://service-scheduler.example/problems/validation-failed
+        title:
+          type: string
+        status:
+          type: integer
+          enum: [422]
+        detail:
+          type: string
+        invalidParams:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/InvalidParam"
+    InvalidParam:
+      type: object
+      required: [name, reason]
+      properties:
+        name:
+          type: string
+          description: Body field, header or parameter name.
+          example: startsAt
+        reason:
+          type: string
+          example: not on the 15-minute grid
     Problem:
       type: object
       description: RFC 9457 problem details. Extension members may be added per problem type.

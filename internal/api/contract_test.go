@@ -122,7 +122,7 @@ func TestContract_Healthz(t *testing.T) {
 	t.Parallel()
 
 	c := newContract(t)
-	h := NewRouter(NewServer(nil, slog.New(slog.DiscardHandler)))
+	h := NewRouter(NewServer(nil, nil, slog.New(slog.DiscardHandler)))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
 	rec := c.do(t, h, req)
