@@ -89,8 +89,8 @@ migrate-status: $(GOOSE) ## Show migration status
 	$(GOOSE) -dir migrations postgres "$(DATABASE_URL)" status
 
 .PHONY: seed
-seed: ## Load idempotent seed data into DATABASE_URL
-	@echo "no seed data yet"
+seed: ## Load idempotent seed data into DATABASE_URL (safe to re-run)
+	go run ./cmd/seed
 
 ## --- Code generation -------------------------------------------------------
 
