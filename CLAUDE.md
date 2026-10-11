@@ -105,8 +105,19 @@ cmd/server ──> internal/api ──> internal/booking ──┬──> intern
 - **Seed data.** `internal/seed` holds fixed-ID rows, upserted in one
   transaction by `make seed` (`cmd/seed`), so re-running converges. Use the
   exported IDs (`seed.DealershipLondon`, ...) in tests and `test/http`.
-- **Logs.** `log/slog` JSON with `*Context` methods. Never log customer names,
-  emails or phone numbers.
+- **Logs.** `log/slog` JSON via `observability.NewLogger`, always with
+  `*Context` methods so `trace_id` and `request_id` are attached. Never log
+  customer names, emails or phone numbers; `TestBook_LogsIDsOnly` pins the
+  booking log fields.
+- **Traces and metrics.** New work gets a span from `observability.Tracer()`;
+  SQL spans come from `observability.QueryTracer` and are named after the
+  sqlc query, never the SQL text. Metrics live in `observability.Metrics`
+  with exactly the Section 9 names; label HTTP metrics by route template
+  (`routeOf`), never the raw path.
+- **Hardening.** `api.NewRouter(srv, api.Options{...})` applies the API-key
+  check (403 on /v1, constant-time), a 64 KiB body cap, a 10s request
+  deadline, the access log and panic recovery. Handler tests use
+  `newTestRouter`, which supplies the test key.
 - **Tools** are pinned in the Makefile and installed into `./bin` by
   `make setup`. Use the make targets, not globally installed binaries.
 - **Commit boundaries.** One logical change per commit: a migration, a query
@@ -145,4 +156,5 @@ make migrate           # goose up against DATABASE_URL
 make seed              # idempotent seed data
 make run               # run the API on the host
 make generate          # sqlc-gen + openapi-gen
+COMPOSE_PROFILES=observability make up   # adds Jaeger (localhost:16686) and Prometheus (localhost:9090)
 ```
