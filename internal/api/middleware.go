@@ -77,6 +77,13 @@ func deadline(d time.Duration) func(http.Handler) http.Handler {
 	}
 }
 
+// probePaths are polled by Prometheus and by orchestrator probes, every few
+// seconds per replica. They are counted in the request-duration metric (so
+// probe latency and 503s can still be alerted on) but get no span and no
+// access-log line: they would bury real traffic in Jaeger and the logs and
+// carry no business logic. A failing /readyz still logs its own warning.
+var probePaths = map[string]bool{"/metrics": true, "/healthz": true, "/readyz": true}
+
 // observe wraps each request in a server span (continuing an incoming W3C
 // trace), then writes one access log line and records the request duration
 // by route template once the router has matched the request.
@@ -84,6 +91,13 @@ func observe(mux *chi.Mux, logger *slog.Logger, metrics *observability.Metrics) 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+			if probePaths[r.URL.Path] {
+				ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+				next.ServeHTTP(ww, r)
+				metrics.ObserveHTTP(r.URL.Path, r.Method, statusOf(ww), time.Since(start))
+				return
+			}
+
 			ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 			ctx, span := observability.Tracer().Start(ctx, r.Method, trace.WithSpanKind(trace.SpanKindServer))
 			defer span.End()
@@ -91,10 +105,7 @@ func observe(mux *chi.Mux, logger *slog.Logger, metrics *observability.Metrics) 
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(ww, r.WithContext(ctx))
 
-			status := ww.Status()
-			if status == 0 {
-				status = http.StatusOK
-			}
+			status := statusOf(ww)
 			route := routeOf(mux, r)
 			elapsed := time.Since(start)
 
@@ -113,6 +124,14 @@ func observe(mux *chi.Mux, logger *slog.Logger, metrics *observability.Metrics) 
 				"duration_ms", float64(elapsed.Microseconds())/1000)
 		})
 	}
+}
+
+// statusOf is the response status, 200 when the handler never set one.
+func statusOf(ww middleware.WrapResponseWriter) int {
+	if s := ww.Status(); s != 0 {
+		return s
+	}
+	return http.StatusOK
 }
 
 // routeOf returns the matched route template, never the raw path, so IDs

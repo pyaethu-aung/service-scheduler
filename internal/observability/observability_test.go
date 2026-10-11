@@ -125,16 +125,18 @@ func TestQueryTracer_SpansNamedByQuery(t *testing.T) {
 	recorder := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
 	qt := QueryTracer{Tracer: tp.Tracer("t")}
+	parent, request := tp.Tracer("t").Start(t.Context(), "request")
 
-	ctx := qt.TraceQueryStart(t.Context(), nil, pgx.TraceQueryStartData{SQL: "-- name: GetCustomer :one\nSELECT id FROM customers WHERE id = $1"})
+	ctx := qt.TraceQueryStart(parent, nil, pgx.TraceQueryStartData{SQL: "-- name: GetCustomer :one\nSELECT id FROM customers WHERE id = $1"})
 	qt.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{Err: errors.New("boom")})
-	ctx = qt.TraceQueryStart(t.Context(), nil, pgx.TraceQueryStartData{SQL: "commit"})
+	ctx = qt.TraceQueryStart(parent, nil, pgx.TraceQueryStartData{SQL: "commit"})
 	qt.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{})
 
 	spans := recorder.Ended()
 	if len(spans) != 2 {
 		t.Fatalf("ended spans = %d, want 2", len(spans))
 	}
+	request.End()
 	if spans[0].Name() != "GetCustomer" || spans[0].Status().Code != codes.Error || spans[0].SpanKind() != trace.SpanKindClient {
 		t.Errorf("first span = %q %v %v", spans[0].Name(), spans[0].Status(), spans[0].SpanKind())
 	}
@@ -154,4 +156,17 @@ func TestQueryTracer_ZeroValueUsesGlobalProvider(t *testing.T) {
 	t.Parallel()
 	ctx := QueryTracer{}.TraceQueryStart(t.Context(), nil, pgx.TraceQueryStartData{SQL: "select 1"})
 	QueryTracer{}.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{})
+}
+
+func TestQueryTracer_NoParentNoSpan(t *testing.T) {
+	t.Parallel()
+	recorder := tracetest.NewSpanRecorder()
+	qt := QueryTracer{Tracer: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)).Tracer("t")}
+
+	// A probe or background job runs SQL outside any request span.
+	ctx := qt.TraceQueryStart(t.Context(), nil, pgx.TraceQueryStartData{SQL: "-- name: DeleteExpiredIdempotencyKeys :execrows\nDELETE ..."})
+	qt.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{})
+	if n := len(recorder.Ended()); n != 0 {
+		t.Errorf("recorded %d spans for a statement without a parent, want 0", n)
+	}
 }

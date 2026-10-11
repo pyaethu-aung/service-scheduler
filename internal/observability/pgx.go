@@ -15,8 +15,10 @@ import (
 
 // QueryTracer is a pgx tracer that opens one span per SQL statement, named
 // after the sqlc query ("BookAppointment"), never the SQL text, so spans
-// carry no parameters or customer data. A zero QueryTracer uses the global
-// tracer provider.
+// carry no parameters or customer data. It only records statements that run
+// inside a traced operation; a statement without a parent span (a probe or
+// a background job) would otherwise appear in Jaeger as a stray root trace.
+// A zero QueryTracer uses the global tracer provider.
 type QueryTracer struct {
 	Tracer trace.Tracer
 }
@@ -25,6 +27,9 @@ var _ pgx.QueryTracer = QueryTracer{}
 
 // TraceQueryStart starts the statement's span.
 func (q QueryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if !trace.SpanContextFromContext(ctx).IsValid() {
+		return ctx // no parent: TraceQueryEnd ends the no-op span in ctx
+	}
 	tracer := q.Tracer
 	if tracer == nil {
 		tracer = Tracer()
