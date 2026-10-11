@@ -19,3 +19,10 @@ sql:
             go_type:
               import: github.com/google/uuid
               type: NullUUID
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
