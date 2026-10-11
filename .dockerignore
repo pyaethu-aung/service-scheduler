@@ -1,0 +1,9 @@
+.git
+.github
+.cache
+.claude
+bin
+.env
+coverage*.out
+docs
+test
