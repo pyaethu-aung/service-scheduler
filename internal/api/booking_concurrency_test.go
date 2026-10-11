@@ -138,7 +138,7 @@ func TestConcurrentBooking_OneFreeBay(t *testing.T) {
 		}
 	})
 	logger := slog.New(slog.NewTextHandler(logs, nil))
-	h := NewRouter(NewServer(avail, booking.New(store, avail, 15*time.Minute, longAgo), logger))
+	h := newTestRouter(NewServer(avail, booking.New(store, avail, 15*time.Minute, longAgo), logger))
 
 	body := fmt.Sprintf(`{"dealershipId":%q,"customerId":%q,"vehicleId":%q,"serviceTypeId":%q,"startsAt":"2030-01-15T10:00:00Z"}`,
 		dealership, customer, vehicle, serviceType)

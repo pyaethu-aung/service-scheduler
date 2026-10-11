@@ -14,3 +14,7 @@ compatibility:
   # Prefix enum constants with their type (HealthStatusOk, not Ok) so enums
   # added by later endpoints cannot collide.
   always-prefix-enum-values: true
+output-options:
+  # /metrics is served by the Prometheus handler; it is in the contract for
+  # documentation only.
+  exclude-operation-ids: [getMetrics]

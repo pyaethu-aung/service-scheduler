@@ -61,7 +61,7 @@ func TestContract_GetAndCancelAppointment(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			fake := tt.fake
-			h := NewRouter(NewServer(nil, &fake, slog.New(slog.DiscardHandler)))
+			h := newTestRouter(NewServer(nil, &fake, slog.New(slog.DiscardHandler)))
 			req := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, nil)
 
 			var rec *httptest.ResponseRecorder
@@ -84,7 +84,7 @@ func TestGetAppointment_InternalError(t *testing.T) {
 		if strings.HasSuffix(path, "/cancel") {
 			method = http.MethodPost
 		}
-		h := NewRouter(NewServer(nil, &fakeBooking{err: errors.New("db down")}, slog.New(slog.DiscardHandler)))
+		h := newTestRouter(NewServer(nil, &fakeBooking{err: errors.New("db down")}, slog.New(slog.DiscardHandler)))
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), method, path, nil))
 		if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "db down") {

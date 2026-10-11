@@ -129,7 +129,7 @@ func TestContract_Availability(t *testing.T) {
 			t.Parallel()
 
 			fake := tt.fake
-			h := NewRouter(NewServer(&fake, nil, slog.New(slog.DiscardHandler)))
+			h := newTestRouter(NewServer(&fake, nil, slog.New(slog.DiscardHandler)))
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.url, nil)
 
 			var rec *httptest.ResponseRecorder
@@ -163,7 +163,7 @@ func TestAvailability_InternalError(t *testing.T) {
 
 	fake := &fakeAvailability{err: errors.New("connection refused to 10.0.0.5")}
 	var logs strings.Builder
-	h := NewRouter(NewServer(fake, nil, slog.New(slog.NewJSONHandler(&logs, nil))))
+	h := newTestRouter(NewServer(fake, nil, slog.New(slog.NewJSONHandler(&logs, nil))))
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet,

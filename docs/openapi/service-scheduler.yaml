@@ -65,6 +65,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Appointment"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -90,6 +92,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Appointment"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
   /v1/appointments/{appointmentId}/cancel:
@@ -111,6 +115,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Appointment"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
   /v1/dealerships/{dealershipId}/availability:
@@ -158,8 +164,47 @@ paths:
                 $ref: "#/components/schemas/Availability"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /readyz:
+    get:
+      operationId: getReadyz
+      summary: Readiness probe
+      description: |
+        200 when the database answers and every migration this build ships
+        has been applied; 503 otherwise, so a load balancer stops sending
+        traffic. Does not require an API key.
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+        "503":
+          description: Not ready; the failing checks say why.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus metrics
+      description: Prometheus text exposition of the Section 9 metrics. Does not require an API key.
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Metrics in the Prometheus text format.
+          content:
+            text/plain:
+              schema:
+                type: string
   /healthz:
     get:
       operationId: getHealthz
@@ -205,6 +250,12 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/ValidationProblem"
+    Forbidden:
+      description: The X-API-Key header is missing or wrong.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
   securitySchemes:
     ApiKeyAuth:
       type: apiKey
@@ -218,6 +269,25 @@ components:
         status:
           type: string
           enum: [ok]
+    Readiness:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        checks:
+          $ref: "#/components/schemas/ReadinessChecks"
+    ReadinessChecks:
+      type: object
+      required: [database, migrations]
+      properties:
+        database:
+          type: string
+          description: '"ok", or why the database is unreachable.'
+        migrations:
+          type: string
+          description: '"ok", or which version is applied versus expected.'
     Availability:
       type: object
       required: [dealershipId, serviceTypeId, date, timezone, durationMinutes, availableStarts]
