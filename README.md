@@ -108,7 +108,7 @@ OIL=01990000-0000-7000-8000-000000000401
 
 # Free oil-change start times on a Tuesday, in UTC
 curl -s -H "X-API-Key: $KEY" \
-  "localhost:8080/v1/dealerships/$LONDON/availability?serviceTypeId=$OIL&date=2027-03-02"
+  "localhost:8080/v1/dealerships/$LONDON/availability?serviceTypeId=$OIL&date=2027-03-09"
 
 # Book one: 201 with the assigned bay and technician
 curl -s -X POST localhost:8080/v1/appointments \
@@ -118,7 +118,7 @@ curl -s -X POST localhost:8080/v1/appointments \
        "customerId":"01990000-0000-7000-8000-000000000503",
        "vehicleId":"01990000-0000-7000-8000-000000000604",
        "serviceTypeId":"'$OIL'",
-       "startsAt":"2027-03-02T10:00:00Z"}'
+       "startsAt":"2027-03-09T10:00:00Z"}'
 
 # Send exactly the same request again: 200 with the same appointment, nothing new booked
 
