@@ -17,14 +17,25 @@ import (
 )
 
 type fakeBooking struct {
-	res booking.Result
-	err error
-	got booking.Request
+	res   booking.Result
+	err   error
+	got   booking.Request
+	gotID uuid.UUID
 }
 
 func (f *fakeBooking) Book(_ context.Context, req booking.Request) (booking.Result, error) {
 	f.got = req
 	return f.res, f.err
+}
+
+func (f *fakeBooking) Get(_ context.Context, id uuid.UUID) (booking.Appointment, error) {
+	f.gotID = id
+	return f.res.Appointment, f.err
+}
+
+func (f *fakeBooking) Cancel(_ context.Context, id uuid.UUID) (booking.Appointment, error) {
+	f.gotID = id
+	return f.res.Appointment, f.err
 }
 
 var (

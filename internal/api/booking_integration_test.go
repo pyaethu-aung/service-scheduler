@@ -61,3 +61,44 @@ func TestContract_BookingSeeded(t *testing.T) {
 		t.Fatalf("full slot: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// Cancel through the full stack: the slot frees, a second cancel returns
+// the same body, and GET shows the cancelled state.
+func TestContract_CancelSeeded(t *testing.T) {
+	t.Parallel()
+
+	longAgo := func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+	pool := dbtest.SeededPool(t)
+	avail := availability.New(db.New(pool), 15*time.Minute, longAgo)
+	bookings := booking.New(booking.NewPGStore(pool), avail, 15*time.Minute, longAgo)
+	h := NewRouter(NewServer(avail, bookings, slog.New(slog.DiscardHandler)))
+	c := newContract(t)
+
+	res, err := bookings.Book(t.Context(), booking.Request{
+		IdempotencyKey: uuid.NewString(), DealershipID: seed.DealershipLondon, CustomerID: seed.CustomerSam,
+		VehicleID: seed.VehicleSam, ServiceTypeID: seed.ServiceOilChange,
+		StartsAt: time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/v1/appointments/" + res.Appointment.ID.String()
+	do := func(method, p string) *httptest.ResponseRecorder {
+		return c.do(t, h, httptest.NewRequestWithContext(t.Context(), method, p, nil))
+	}
+
+	first := do(http.MethodPost, path+"/cancel")
+	second := do(http.MethodPost, path+"/cancel")
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"status":"cancelled"`) {
+		t.Fatalf("cancel: %d %s", first.Code, first.Body)
+	}
+	if second.Code != http.StatusOK || second.Body.String() != first.Body.String() {
+		t.Errorf("second cancel: %d %s, want the same 200 body", second.Code, second.Body)
+	}
+	if got := do(http.MethodGet, path); got.Code != http.StatusOK || got.Body.String() != first.Body.String() {
+		t.Errorf("get after cancel: %d %s", got.Code, got.Body)
+	}
+	if got := do(http.MethodGet, "/v1/appointments/"+uuid.NewString()); got.Code != http.StatusNotFound {
+		t.Errorf("get unknown: %d", got.Code)
+	}
+}
