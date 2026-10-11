@@ -16,7 +16,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pyaethu-aung/service-scheduler/internal/api"
+	"github.com/pyaethu-aung/service-scheduler/internal/availability"
 	"github.com/pyaethu-aung/service-scheduler/internal/config"
+	"github.com/pyaethu-aung/service-scheduler/internal/db"
 )
 
 // shutdownTimeout bounds how long in-flight requests may drain after SIGTERM.
@@ -60,7 +62,7 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, r
 	}
 
 	srv := &http.Server{
-		Handler:           api.NewRouter(&api.Server{}),
+		Handler:           api.NewRouter(api.NewServer(availability.New(db.New(pool), cfg.SlotGranularity, time.Now), logger)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

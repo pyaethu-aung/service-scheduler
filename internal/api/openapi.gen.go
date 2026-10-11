@@ -9,14 +9,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for HealthStatus.
@@ -34,6 +38,27 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Availability defines model for Availability.
+type Availability struct {
+	// AvailableStarts Free start times in UTC, ascending.
+	//
+	// Example: ["2026-10-20T07:00:00Z","2026-10-20T07:15:00Z"]
+	AvailableStarts []time.Time `json:"availableStarts"`
+
+	// Date The requested local date.
+	Date         openapi_types.Date `json:"date"`
+	DealershipId openapi_types.UUID `json:"dealershipId"`
+
+	// DurationMinutes Service duration; each start reserves [start, start + duration).
+	DurationMinutes int                `json:"durationMinutes"`
+	ServiceTypeId   openapi_types.UUID `json:"serviceTypeId"`
+
+	// Timezone The dealership's IANA timezone, which the date is local to.
+	//
+	// Example: Europe/London
+	Timezone string `json:"timezone"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -42,11 +67,171 @@ type Health struct {
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
 
+// Problem RFC 9457 problem details. Extension members may be added per problem type.
+type Problem struct {
+	// Detail Human-readable explanation specific to this occurrence.
+	Detail *string `json:"detail,omitempty"`
+
+	// Instance URI reference identifying this occurrence.
+	Instance *string `json:"instance,omitempty"`
+
+	// Status HTTP status code for this occurrence.
+	Status int `json:"status"`
+
+	// Title Short, human-readable summary of the problem type.
+	Title string `json:"title"`
+
+	// Type URI reference identifying the problem type.
+	//
+	// Example: https://service-scheduler.example/problems/slot-unavailable
+	Type                 string                 `json:"type"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// BadRequest RFC 9457 problem details. Extension members may be added per problem type.
+type BadRequest = Problem
+
+// NotFound RFC 9457 problem details. Extension members may be added per problem type.
+type NotFound = Problem
+
+// GetAvailabilityParams defines parameters for GetAvailability.
+type GetAvailabilityParams struct {
+	ServiceTypeId openapi_types.UUID `form:"serviceTypeId" json:"serviceTypeId"`
+
+	// Date Local calendar date at the dealership (YYYY-MM-DD).
+	Date openapi_types.Date `form:"date" json:"date"`
+}
+
+// Getter for additional properties for Problem. Returns the specified
+// element and whether it was found
+func (a Problem) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for Problem
+func (a *Problem) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for Problem to handle AdditionalProperties
+func (a *Problem) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["detail"]; found {
+		err = json.Unmarshal(raw, &a.Detail)
+		if err != nil {
+			return fmt.Errorf("error reading 'detail': %w", err)
+		}
+		delete(object, "detail")
+	}
+
+	if raw, found := object["instance"]; found {
+		err = json.Unmarshal(raw, &a.Instance)
+		if err != nil {
+			return fmt.Errorf("error reading 'instance': %w", err)
+		}
+		delete(object, "instance")
+	}
+
+	if raw, found := object["status"]; found {
+		err = json.Unmarshal(raw, &a.Status)
+		if err != nil {
+			return fmt.Errorf("error reading 'status': %w", err)
+		}
+		delete(object, "status")
+	}
+
+	if raw, found := object["title"]; found {
+		err = json.Unmarshal(raw, &a.Title)
+		if err != nil {
+			return fmt.Errorf("error reading 'title': %w", err)
+		}
+		delete(object, "title")
+	}
+
+	if raw, found := object["type"]; found {
+		err = json.Unmarshal(raw, &a.Type)
+		if err != nil {
+			return fmt.Errorf("error reading 'type': %w", err)
+		}
+		delete(object, "type")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for Problem to handle AdditionalProperties
+func (a Problem) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Detail != nil {
+		object["detail"], err = json.Marshal(a.Detail)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'detail': %w", err)
+		}
+	}
+
+	if a.Instance != nil {
+		object["instance"], err = json.Marshal(a.Instance)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'instance': %w", err)
+		}
+	}
+
+	object["status"], err = json.Marshal(a.Status)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'status': %w", err)
+	}
+
+	object["title"], err = json.Marshal(a.Title)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'title': %w", err)
+	}
+
+	object["type"], err = json.Marshal(a.Type)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'type': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
+	// GetAvailability Free start times for a service type on a date
+	// (GET /v1/dealerships/{dealershipId}/availability)
+	GetAvailability(w http.ResponseWriter, r *http.Request, dealershipId openapi_types.UUID, params GetAvailabilityParams)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -56,6 +241,12 @@ type Unimplemented struct{}
 // GetHealthz Liveness probe
 // (GET /healthz)
 func (_ Unimplemented) GetHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAvailability Free start times for a service type on a date
+// (GET /v1/dealerships/{dealershipId}/availability)
+func (_ Unimplemented) GetAvailability(w http.ResponseWriter, r *http.Request, dealershipId openapi_types.UUID, params GetAvailabilityParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -73,6 +264,61 @@ func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAvailability operation middleware
+func (siw *ServerInterfaceWrapper) GetAvailability(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dealershipId" -------------
+	var dealershipId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dealershipId", chi.URLParam(r, "dealershipId"), &dealershipId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dealershipId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAvailabilityParams
+
+	// ------------- Required query parameter "serviceTypeId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "serviceTypeId", r.URL.Query(), &params.ServiceTypeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "serviceTypeId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serviceTypeId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "date" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "date", r.URL.Query(), &params.Date, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "date"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "date", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAvailability(w, r, dealershipId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -196,11 +442,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/dealerships/{dealershipId}/availability", wrapper.GetAvailability)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealthz)
 	})
 
 	return r
 }
+
+type BadRequestApplicationProblemPlusJSONResponse Problem
+
+type NotFoundApplicationProblemPlusJSONResponse Problem
 
 type GetHealthzRequestObject struct {
 }
@@ -223,11 +476,69 @@ func (response GetHealthz200JSONResponse) VisitGetHealthzResponse(w http.Respons
 	return err
 }
 
+type GetAvailabilityRequestObject struct {
+	DealershipId openapi_types.UUID `json:"dealershipId"`
+	Params       GetAvailabilityParams
+}
+
+type GetAvailabilityResponseObject interface {
+	VisitGetAvailabilityResponse(w http.ResponseWriter) error
+}
+
+type GetAvailability200JSONResponse Availability
+
+func (response GetAvailability200JSONResponse) VisitGetAvailabilityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAvailability400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetAvailability400ApplicationProblemPlusJSONResponse) VisitGetAvailabilityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAvailability404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAvailability404ApplicationProblemPlusJSONResponse) VisitGetAvailabilityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealthz Liveness probe
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
+	// GetAvailability Free start times for a service type on a date
+	// (GET /v1/dealerships/{dealershipId}/availability)
+	GetAvailability(ctx context.Context, request GetAvailabilityRequestObject) (GetAvailabilityResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -293,22 +604,66 @@ func (sh *strictHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GetAvailability operation middleware
+func (sh *strictHandler) GetAvailability(w http.ResponseWriter, r *http.Request, dealershipId openapi_types.UUID, params GetAvailabilityParams) {
+	var request GetAvailabilityRequestObject
+
+	request.DealershipId = dealershipId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAvailability(ctx, request.(GetAvailabilityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAvailability")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAvailabilityResponseObject); ok {
+		if err := validResponse.VisitGetAvailabilityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
 // Stored as a slice of fixed-width chunks rather than one concatenated
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
