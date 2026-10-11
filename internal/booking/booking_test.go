@@ -52,10 +52,17 @@ type fakeStore struct {
 	bookCalls    int
 	booked       []db.BookAppointmentParams
 	failOn       string // method name that returns errStore
+	missing      map[uuid.UUID]bool
+	cancelled    map[uuid.UUID]bool
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{vehicleOwner: customerID, keys: map[string]db.IdempotencyKey{}}
+	return &fakeStore{
+		vehicleOwner: customerID,
+		keys:         map[string]db.IdempotencyKey{},
+		missing:      map[uuid.UUID]bool{},
+		cancelled:    map[uuid.UUID]bool{},
+	}
 }
 
 func (f *fakeStore) fail(method string) error {
@@ -121,8 +128,15 @@ func (f *fakeStore) GetAppointmentDetails(_ context.Context, id uuid.UUID) (db.G
 	if err := f.fail("GetAppointmentDetails"); err != nil {
 		return db.GetAppointmentDetailsRow{}, err
 	}
+	if f.missing[id] {
+		return db.GetAppointmentDetailsRow{}, pgx.ErrNoRows
+	}
+	status := "confirmed"
+	if f.cancelled[id] {
+		status = "cancelled"
+	}
 	return db.GetAppointmentDetailsRow{
-		ID: id, Status: "confirmed",
+		ID: id, Status: status,
 		StartsAt: z("2026-10-20T02:00:00Z"), EndsAt: z("2026-10-20T03:00:00Z"),
 		CustomerID: customerID, VehicleID: vehicleID,
 		DealershipID: dealershipID, DealershipName: "District 7",
@@ -136,6 +150,17 @@ func (f *fakeStore) HasFreeBay(context.Context, db.HasFreeBayParams) (bool, erro
 		return false, err
 	}
 	return f.freeBay, nil
+}
+
+func (f *fakeStore) CancelAppointment(_ context.Context, id uuid.UUID) (db.Appointment, error) {
+	if err := f.fail("CancelAppointment"); err != nil {
+		return db.Appointment{}, err
+	}
+	if f.missing[id] {
+		return db.Appointment{}, pgx.ErrNoRows
+	}
+	f.cancelled[id] = true
+	return db.Appointment{ID: id, Status: "cancelled"}, nil
 }
 
 func (f *fakeStore) DeleteExpiredIdempotencyKeys(_ context.Context, liveSince time.Time) (int64, error) {
@@ -548,4 +573,41 @@ func TestBook_StoreErrors(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+}
+
+func TestGetAndCancel(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	svc := newService(store, &fakeAvailability{})
+	id, unknown := uuid.New(), uuid.New()
+	store.missing[unknown] = true
+
+	got, err := svc.Get(t.Context(), id)
+	if err != nil || got.Status != "confirmed" || got.ID != id {
+		t.Fatalf("Get = %+v, %v", got, err)
+	}
+
+	first, err := svc.Cancel(t.Context(), id)
+	if err != nil || first.Status != "cancelled" {
+		t.Fatalf("first cancel = %+v, %v", first, err)
+	}
+	second, err := svc.Cancel(t.Context(), id)
+	if err != nil || second != first {
+		t.Errorf("second cancel = %+v, %v; want the same state %+v", second, err, first)
+	}
+
+	for name, call := range map[string]func() error{
+		"get":    func() error { _, err := svc.Get(t.Context(), unknown); return err },
+		"cancel": func() error { _, err := svc.Cancel(t.Context(), unknown); return err },
+	} {
+		var nf *NotFoundError
+		if err := call(); !errors.As(err, &nf) || nf.Resource != "appointment" || nf.ID != unknown {
+			t.Errorf("%s unknown: error = %v, want appointment not found", name, err)
+		}
+	}
+
+	store.failOn = "CancelAppointment"
+	if _, err := svc.Cancel(t.Context(), id); !errors.Is(err, errStore) {
+		t.Errorf("cancel store error = %v", err)
+	}
 }
