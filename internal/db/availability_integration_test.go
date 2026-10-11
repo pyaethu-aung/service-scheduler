@@ -75,8 +75,8 @@ func TestListConfirmedAppointmentsInRange(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 
-	before := f.mustBook(t, f.bays[0], f.techs[0], at(7, 0), at(8, 0))   // touches the window start
-	inside := f.mustBook(t, f.bays[0], f.techs[0], at(9, 0), at(10, 0))  // inside
+	before := f.mustBook(t, f.bays[0], f.techs[0], at(7, 0), at(8, 0))    // touches the window start
+	inside := f.mustBook(t, f.bays[0], f.techs[0], at(9, 0), at(10, 0))   // inside
 	spanning := f.mustBook(t, f.bays[1], f.techs[1], at(7, 30), at(9, 0)) // crosses the window start
 	cancelled := f.mustBook(t, f.bays[1], f.techs[1], at(10, 0), at(11, 0))
 	if _, err := f.q.CancelAppointment(ctx, cancelled.ID); err != nil {
