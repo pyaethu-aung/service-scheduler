@@ -66,6 +66,40 @@ func (s *Server) BookAppointment(ctx context.Context, req BookAppointmentRequest
 	return BookAppointment201JSONResponse(appointmentResponse(res.Appointment)), nil
 }
 
+// GetAppointment returns an appointment in its current state.
+func (s *Server) GetAppointment(ctx context.Context, req GetAppointmentRequestObject) (GetAppointmentResponseObject, error) {
+	a, err := s.booking.Get(ctx, req.AppointmentId)
+	if p, ok := appointmentNotFound(err); ok {
+		return GetAppointment404ApplicationProblemPlusJSONResponse{p}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get appointment: %w", err)
+	}
+	return GetAppointment200JSONResponse(appointmentResponse(a)), nil
+}
+
+// CancelAppointment cancels an appointment; cancelling again is a no-op
+// that returns the same state.
+func (s *Server) CancelAppointment(ctx context.Context, req CancelAppointmentRequestObject) (CancelAppointmentResponseObject, error) {
+	a, err := s.booking.Cancel(ctx, req.AppointmentId)
+	if p, ok := appointmentNotFound(err); ok {
+		return CancelAppointment404ApplicationProblemPlusJSONResponse{p}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cancel appointment: %w", err)
+	}
+	return CancelAppointment200JSONResponse(appointmentResponse(a)), nil
+}
+
+func appointmentNotFound(err error) (NotFoundApplicationProblemPlusJSONResponse, bool) {
+	var nf *booking.NotFoundError
+	if !errors.As(err, &nf) {
+		return NotFoundApplicationProblemPlusJSONResponse{}, false
+	}
+	return NotFoundApplicationProblemPlusJSONResponse(newProblem(http.StatusNotFound, "not-found",
+		"Appointment not found", fmt.Sprintf("no appointment with id %s", nf.ID))), true
+}
+
 func appointmentResponse(a booking.Appointment) Appointment {
 	return Appointment{
 		Id:          a.ID,

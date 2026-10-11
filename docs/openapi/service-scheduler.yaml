@@ -75,6 +75,44 @@ paths:
                 $ref: "#/components/schemas/SlotUnavailableProblem"
         "422":
           $ref: "#/components/responses/ValidationFailed"
+  /v1/appointments/{appointmentId}:
+    get:
+      operationId: getAppointment
+      summary: Fetch an appointment
+      description: Returns the appointment in its current state, confirmed or cancelled.
+      tags: [appointments]
+      parameters:
+        - $ref: "#/components/parameters/AppointmentId"
+      responses:
+        "200":
+          description: The appointment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/appointments/{appointmentId}/cancel:
+    post:
+      operationId: cancelAppointment
+      summary: Cancel an appointment
+      description: |
+        Cancels the appointment and releases its bay and technician at once
+        (FR5, Section 5.4); the row is kept for history. Cancelling an
+        already-cancelled appointment changes nothing and returns 200 with
+        the same state, so the call is idempotent.
+      tags: [appointments]
+      parameters:
+        - $ref: "#/components/parameters/AppointmentId"
+      responses:
+        "200":
+          description: The cancelled appointment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /v1/dealerships/{dealershipId}/availability:
     get:
       operationId: getAvailability
@@ -137,6 +175,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Health"
 components:
+  parameters:
+    AppointmentId:
+      name: appointmentId
+      in: path
+      required: true
+      description: An identifier that is not a UUID cannot exist, so it is a 404.
+      schema:
+        type: string
+        format: uuid
   responses:
     BadRequest:
       description: The request is malformed (an invalid UUID or date, or a missing parameter).

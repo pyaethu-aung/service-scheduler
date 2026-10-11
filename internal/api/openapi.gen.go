@@ -253,6 +253,9 @@ type ValidationProblem struct {
 // ValidationProblemStatus defines model for ValidationProblem.Status.
 type ValidationProblemStatus int
 
+// AppointmentId defines model for AppointmentId.
+type AppointmentId = openapi_types.UUID
+
 // BadRequest RFC 9457 problem details. Extension members may be added per problem type.
 type BadRequest = Problem
 
@@ -409,6 +412,12 @@ type ServerInterface interface {
 	// BookAppointment Book an appointment
 	// (POST /v1/appointments)
 	BookAppointment(w http.ResponseWriter, r *http.Request, params BookAppointmentParams)
+	// GetAppointment Fetch an appointment
+	// (GET /v1/appointments/{appointmentId})
+	GetAppointment(w http.ResponseWriter, r *http.Request, appointmentId AppointmentId)
+	// CancelAppointment Cancel an appointment
+	// (POST /v1/appointments/{appointmentId}/cancel)
+	CancelAppointment(w http.ResponseWriter, r *http.Request, appointmentId AppointmentId)
 	// GetAvailability Free start times for a service type on a date
 	// (GET /v1/dealerships/{dealershipId}/availability)
 	GetAvailability(w http.ResponseWriter, r *http.Request, dealershipId openapi_types.UUID, params GetAvailabilityParams)
@@ -427,6 +436,18 @@ func (_ Unimplemented) GetHealthz(w http.ResponseWriter, r *http.Request) {
 // BookAppointment Book an appointment
 // (POST /v1/appointments)
 func (_ Unimplemented) BookAppointment(w http.ResponseWriter, r *http.Request, params BookAppointmentParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAppointment Fetch an appointment
+// (GET /v1/appointments/{appointmentId})
+func (_ Unimplemented) GetAppointment(w http.ResponseWriter, r *http.Request, appointmentId AppointmentId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CancelAppointment Cancel an appointment
+// (POST /v1/appointments/{appointmentId}/cancel)
+func (_ Unimplemented) CancelAppointment(w http.ResponseWriter, r *http.Request, appointmentId AppointmentId) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -495,6 +516,58 @@ func (siw *ServerInterfaceWrapper) BookAppointment(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.BookAppointment(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAppointment operation middleware
+func (siw *ServerInterfaceWrapper) GetAppointment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "appointmentId" -------------
+	var appointmentId AppointmentId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "appointmentId", chi.URLParam(r, "appointmentId"), &appointmentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "appointmentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAppointment(w, r, appointmentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelAppointment operation middleware
+func (siw *ServerInterfaceWrapper) CancelAppointment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "appointmentId" -------------
+	var appointmentId AppointmentId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "appointmentId", chi.URLParam(r, "appointmentId"), &appointmentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "appointmentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelAppointment(w, r, appointmentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -676,6 +749,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/appointments", wrapper.BookAppointment)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/appointments/{appointmentId}", wrapper.GetAppointment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/appointments/{appointmentId}/cancel", wrapper.CancelAppointment)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/dealerships/{dealershipId}/availability", wrapper.GetAvailability)
 	})
 	r.Group(func(r chi.Router) {
@@ -795,6 +874,82 @@ func (response BookAppointment422ApplicationProblemPlusJSONResponse) VisitBookAp
 	return err
 }
 
+type GetAppointmentRequestObject struct {
+	AppointmentId AppointmentId `json:"appointmentId"`
+}
+
+type GetAppointmentResponseObject interface {
+	VisitGetAppointmentResponse(w http.ResponseWriter) error
+}
+
+type GetAppointment200JSONResponse Appointment
+
+func (response GetAppointment200JSONResponse) VisitGetAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAppointment404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetAppointment404ApplicationProblemPlusJSONResponse) VisitGetAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAppointmentRequestObject struct {
+	AppointmentId AppointmentId `json:"appointmentId"`
+}
+
+type CancelAppointmentResponseObject interface {
+	VisitCancelAppointmentResponse(w http.ResponseWriter) error
+}
+
+type CancelAppointment200JSONResponse Appointment
+
+func (response CancelAppointment200JSONResponse) VisitCancelAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAppointment404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response CancelAppointment404ApplicationProblemPlusJSONResponse) VisitCancelAppointmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetAvailabilityRequestObject struct {
 	DealershipId openapi_types.UUID `json:"dealershipId"`
 	Params       GetAvailabilityParams
@@ -858,6 +1013,12 @@ type StrictServerInterface interface {
 	// BookAppointment Book an appointment
 	// (POST /v1/appointments)
 	BookAppointment(ctx context.Context, request BookAppointmentRequestObject) (BookAppointmentResponseObject, error)
+	// GetAppointment Fetch an appointment
+	// (GET /v1/appointments/{appointmentId})
+	GetAppointment(ctx context.Context, request GetAppointmentRequestObject) (GetAppointmentResponseObject, error)
+	// CancelAppointment Cancel an appointment
+	// (POST /v1/appointments/{appointmentId}/cancel)
+	CancelAppointment(ctx context.Context, request CancelAppointmentRequestObject) (CancelAppointmentResponseObject, error)
 	// GetAvailability Free start times for a service type on a date
 	// (GET /v1/dealerships/{dealershipId}/availability)
 	GetAvailability(ctx context.Context, request GetAvailabilityRequestObject) (GetAvailabilityResponseObject, error)
@@ -959,6 +1120,58 @@ func (sh *strictHandler) BookAppointment(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// GetAppointment operation middleware
+func (sh *strictHandler) GetAppointment(w http.ResponseWriter, r *http.Request, appointmentId AppointmentId) {
+	var request GetAppointmentRequestObject
+
+	request.AppointmentId = appointmentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAppointment(ctx, request.(GetAppointmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAppointment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAppointmentResponseObject); ok {
+		if err := validResponse.VisitGetAppointmentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelAppointment operation middleware
+func (sh *strictHandler) CancelAppointment(w http.ResponseWriter, r *http.Request, appointmentId AppointmentId) {
+	var request CancelAppointmentRequestObject
+
+	request.AppointmentId = appointmentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelAppointment(ctx, request.(CancelAppointmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelAppointment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelAppointmentResponseObject); ok {
+		if err := validResponse.VisitCancelAppointmentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetAvailability operation middleware
 func (sh *strictHandler) GetAvailability(w http.ResponseWriter, r *http.Request, dealershipId openapi_types.UUID, params GetAvailabilityParams) {
 	var request GetAvailabilityRequestObject
@@ -991,54 +1204,57 @@ func (sh *strictHandler) GetAvailability(w http.ResponseWriter, r *http.Request,
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"3wEAAP//",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
