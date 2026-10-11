@@ -109,11 +109,17 @@ openapi-gen: $(OAPI_CODEGEN) ## Generate internal/api from the OpenAPI document
 
 .PHONY: check-generated
 check-generated: generate ## Fail if generated code is out of sync with its sources
-	@if ! git diff --quiet -- $(GENERATED) || [ -n "$$(git ls-files --others --exclude-standard -- $(GENERATED))" ]; then \
+	@# Unstaged edits to generated files, plus untracked files that carry the
+	@# generated-code header (hand-written files such as tests are ignored).
+	@stale="$$(git diff --name-only -- $(GENERATED); \
+		for f in $$(git ls-files --others --exclude-standard -- $(GENERATED)); do \
+			grep -q -E '^// Code generated .* DO NOT EDIT\.$$' "$$f" && echo "$$f"; \
+		done)"; \
+	if [ -n "$$stale" ]; then \
 		echo "generated code is out of sync: run 'make generate' and commit the result"; \
-		git status --short -- $(GENERATED); \
+		echo "$$stale"; \
 		exit 1; \
-	fi
+	fi; true
 
 .PHONY: tidy-check
 tidy-check: ## Fail if go.mod or go.sum need go mod tidy
