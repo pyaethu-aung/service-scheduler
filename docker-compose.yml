@@ -12,7 +12,8 @@ services:
       POSTGRES_PASSWORD: scheduler
       POSTGRES_DB: scheduler
     ports:
-      - "5432:5432"
+      # Override in .env when 5432 is taken by another local database.
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       # postgres 18 images keep PGDATA under /var/lib/postgresql/18/docker.
       - pgdata:/var/lib/postgresql
