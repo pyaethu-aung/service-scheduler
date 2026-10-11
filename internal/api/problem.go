@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 // problemBase prefixes every RFC 9457 problem type URI.
@@ -28,13 +29,19 @@ func writeProblem(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// requestError handles malformed parameters and bodies. The booking
-// contract has no 400 (Section 7), so POST /v1/appointments answers 422
-// with the offending parameter; every other route answers 400.
+// requestError handles malformed parameters and bodies, keeping each
+// route's documented statuses (Section 7): POST /v1/appointments has no 400,
+// so it answers 422 with the offending parameter; an appointment id that is
+// not a UUID cannot exist, so it is a 404; every other route answers 400.
 func requestError(w http.ResponseWriter, r *http.Request, err error) {
-	if r.Method == http.MethodPost && r.URL.Path == "/v1/appointments" {
+	switch {
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/appointments":
 		writeProblem(w, http.StatusUnprocessableEntity,
 			validationProblem(InvalidParam{Name: paramName(err), Reason: err.Error()}))
+		return
+	case strings.HasPrefix(r.URL.Path, "/v1/appointments/"):
+		writeProblem(w, http.StatusNotFound,
+			newProblem(http.StatusNotFound, "not-found", "Appointment not found", err.Error()))
 		return
 	}
 	writeProblem(w, http.StatusBadRequest,
