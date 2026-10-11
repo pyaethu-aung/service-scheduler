@@ -107,6 +107,9 @@ func TestObserve_LogsAndMetricsUseRouteTemplates(t *testing.T) {
 		req.Header.Set("X-API-Key", "k")
 		h.ServeHTTP(httptest.NewRecorder(), req)
 	}
+	// Rejected by the API-key check before routing: still labelled by route.
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		"/v1/appointments/"+id+"/cancel", nil))
 
 	var first map[string]any
 	if err := json.Unmarshal([]byte(strings.SplitN(logs.String(), "\n", 2)[0]), &first); err != nil {
@@ -126,6 +129,7 @@ func TestObserve_LogsAndMetricsUseRouteTemplates(t *testing.T) {
 	for _, want := range []string{
 		`http_server_request_duration_seconds_count{method="GET",route="/v1/appointments/{appointmentId}",status="200"} 1`,
 		`route="unmatched",status="404"`,
+		`http_server_request_duration_seconds_count{method="POST",route="/v1/appointments/{appointmentId}/cancel",status="403"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics missing %s", want)
