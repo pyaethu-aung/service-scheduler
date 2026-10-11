@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -57,6 +58,18 @@ func newContract(t *testing.T) *contract {
 // does not conform to the contract.
 func (c *contract) do(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
+	return c.serve(t, h, req, true)
+}
+
+// doInvalid is do for a request that breaks the contract on purpose: only
+// the response is validated.
+func (c *contract) doInvalid(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+	return c.serve(t, h, req, false)
+}
+
+func (c *contract) serve(t *testing.T, h http.Handler, req *http.Request, validateRequest bool) *httptest.ResponseRecorder {
+	t.Helper()
 
 	var body []byte
 	if req.Body != nil {
@@ -77,8 +90,12 @@ func (c *contract) do(t *testing.T, h http.Handler, req *http.Request) *httptest
 		Route:      route,
 		Options:    &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc},
 	}
-	if err := openapi3filter.ValidateRequest(req.Context(), reqInput); err != nil {
-		t.Fatalf("request does not match the contract: %v", err)
+	if validateRequest {
+		if err := openapi3filter.ValidateRequest(req.Context(), reqInput); err != nil {
+			t.Fatalf("request does not match the contract: %v", err)
+		}
+	} else if err := openapi3filter.ValidateRequest(req.Context(), reqInput); err == nil {
+		t.Fatalf("request was meant to break the contract but is valid")
 	}
 	req.Body = io.NopCloser(bytes.NewReader(body))
 
@@ -105,7 +122,7 @@ func TestContract_Healthz(t *testing.T) {
 	t.Parallel()
 
 	c := newContract(t)
-	h := NewRouter(&Server{})
+	h := NewRouter(NewServer(nil, slog.New(slog.DiscardHandler)))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
 	rec := c.do(t, h, req)

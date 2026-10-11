@@ -16,6 +16,53 @@ servers:
 security:
   - ApiKeyAuth: []
 paths:
+  /v1/dealerships/{dealershipId}/availability:
+    get:
+      operationId: getAvailability
+      summary: Free start times for a service type on a date
+      description: |
+        Lists the start times on one local date at which a bay and a technician
+        qualified for the service type are both free for the whole service
+        duration (FR4). Start times are on the slot grid, inside the
+        dealership's opening hours, in the future, and returned in UTC.
+
+        The list is advisory: a start shown as free can be taken before the
+        client books, and the booking endpoint re-checks. A closed day, a past
+        date, or a service type no technician here is qualified for returns an
+        empty list.
+      tags: [availability]
+      parameters:
+        - name: dealershipId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: serviceTypeId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: date
+          in: query
+          required: true
+          description: Local calendar date at the dealership (YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+            example: "2026-10-20"
+      responses:
+        "200":
+          description: Free start times, possibly none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Availability"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /healthz:
     get:
       operationId: getHealthz
@@ -31,6 +78,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Health"
 components:
+  responses:
+    BadRequest:
+      description: The request is malformed (an invalid UUID or date, or a missing parameter).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: A referenced resource does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
   securitySchemes:
     ApiKeyAuth:
       type: apiKey
@@ -44,6 +104,35 @@ components:
         status:
           type: string
           enum: [ok]
+    Availability:
+      type: object
+      required: [dealershipId, serviceTypeId, date, timezone, durationMinutes, availableStarts]
+      properties:
+        dealershipId:
+          type: string
+          format: uuid
+        serviceTypeId:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+          description: The requested local date.
+        timezone:
+          type: string
+          description: The dealership's IANA timezone, which the date is local to.
+          example: Europe/London
+        durationMinutes:
+          type: integer
+          minimum: 1
+          description: Service duration; each start reserves [start, start + duration).
+        availableStarts:
+          type: array
+          description: Free start times in UTC, ascending.
+          items:
+            type: string
+            format: date-time
+          example: ["2026-10-20T07:00:00Z", "2026-10-20T07:15:00Z"]
     Problem:
       type: object
       description: RFC 9457 problem details. Extension members may be added per problem type.
