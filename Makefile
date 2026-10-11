@@ -68,7 +68,8 @@ $(GOVULNCHECK):
 
 .PHONY: up
 up: ## Start api + postgres (COMPOSE_PROFILES=observability adds the o11y stack)
-	docker compose up -d --build --wait
+	API_OTLP_ENDPOINT=$(if $(findstring observability,$(COMPOSE_PROFILES)),otel-collector:4317,) \
+		docker compose up -d --build --wait
 
 .PHONY: down
 down: ## Stop every compose service, including the observability profile
