@@ -82,6 +82,18 @@ cmd/server ──> internal/api ──> internal/booking ──┬──> intern
   handlers map them to the documented problem+json responses. Binding errors
   become 400 problem+json and unexpected errors a bare 500 problem+json with
   the cause logged (`internal/api/problem.go`).
+- **Booking concurrency.** `booking.PGStore.Book` takes a transaction-scoped
+  advisory lock on the dealership's local day, then runs `BookAppointment`
+  (verbatim from Section 5.2) and the Idempotency-Key claim in one
+  transaction. `db.Translate` maps 23P01 and 40P01 (deadlocks between racing
+  exclusion-constraint inserts) to `db.ErrSlotTaken`, retried at most 3
+  times with jitter. The lock only removes churn; the exclusion constraints
+  stay the guarantee. Never remove the lock or the retry without re-running
+  `make test-concurrency` many times.
+- **Booking errors.** `booking.ValidationError` maps to 422 `invalidParams`,
+  `NotFoundError` to 404, `UnavailableError` to 409 with `reason` and
+  `suggestedStarts`. Malformed POST /v1/appointments requests are 422, not
+  400 (Section 7 has no 400 there); other routes answer 400.
 - **Time in the slot engine.** `internal/slots` steps through real instants
   from the opening instant: spring-forward gaps are skipped, the fall-back
   hour is offered twice. Booking must validate starts with `slots.OnGrid` so
@@ -111,7 +123,8 @@ develop-go-feature gate runner in `.cache/develop-go-feature/gates.json`.
 | go.mod tidy, generated code in sync | `make tidy-check check-generated` | no |
 | unit + integration tests (race), coverage at least 85%, generated code excluded | `make coverage` | **yes** |
 
-Contract tests: `make test-api`. **Integration tests need a running Docker
+Contract tests: `make test-api`. The NFR1 proof: `make test-concurrency`
+(50 concurrent bookings for one free bay; protected, never loosen it). **Integration tests need a running Docker
 daemon** because testcontainers-go starts `postgres:18` per test package.
 CI runs the same gates in `.github/workflows/ci.yml`. The git hooks in
 `.githooks/` (enabled by `make setup`) run the tidy and generated-code checks
