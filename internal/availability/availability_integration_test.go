@@ -243,3 +243,26 @@ func TestAvailability_Errors(t *testing.T) {
 		})
 	}
 }
+
+type countingRecorder struct{ got []int }
+
+func (c *countingRecorder) SlotsReturned(n int) { c.got = append(c.got, n) }
+
+func TestAvailability_RecordsSlotsReturned(t *testing.T) {
+	t.Parallel()
+	rec := &countingRecorder{}
+	svc := availability.New(store(t), 15*time.Minute, longAgo).Instrument(rec)
+
+	if _, err := svc.Availability(t.Context(), availability.Query{
+		DealershipID: seed.DealershipLondon, ServiceTypeID: seed.ServiceOilChange,
+		Date: slots.Date{Year: 2026, Month: time.October, Day: 27},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Availability(t.Context(), availability.Query{DealershipID: uuid.New(), ServiceTypeID: seed.ServiceOilChange}); err == nil {
+		t.Fatal("unknown dealership answered")
+	}
+	if len(rec.got) != 1 || rec.got[0] != 37 {
+		t.Errorf("recorded %v, want one observation of 37 (errors are not recorded)", rec.got)
+	}
+}
