@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Blocks a commit when go.mod/go.sum are not tidy or when generated code
+# (sqlc, oapi-codegen) is out of sync with its sources.
+set -euo pipefail
+
+make --no-print-directory tidy-check
+make --no-print-directory check-generated
