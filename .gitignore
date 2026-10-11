@@ -1,0 +1,16 @@
+# Tools installed by make setup
+/bin/
+
+# Local config and secrets
+.env
+
+# Build and test output
+*.test
+*.out
+/dist/
+
+# Agent and editor caches
+/.cache/
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Runs the merge gates before anything leaves the machine: lint, unit tests
+# with the race detector, then the coverage gate (unit + integration tests,
+# so Docker must be running for testcontainers).
+set -euo pipefail
+
+make --no-print-directory lint
+make --no-print-directory test
+make --no-print-directory coverage
