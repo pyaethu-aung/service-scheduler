@@ -149,7 +149,7 @@ func TestContract_BookAppointment(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			fake := tt.fake
-			h := NewRouter(NewServer(nil, &fake, slog.New(slog.DiscardHandler)))
+			h := newTestRouter(NewServer(nil, &fake, slog.New(slog.DiscardHandler)))
 
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/appointments", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
@@ -191,7 +191,7 @@ func TestContract_BookAppointment(t *testing.T) {
 
 func TestBookAppointment_InternalError(t *testing.T) {
 	t.Parallel()
-	h := NewRouter(NewServer(nil, &fakeBooking{err: errors.New("pool exhausted")}, slog.New(slog.DiscardHandler)))
+	h := newTestRouter(NewServer(nil, &fakeBooking{err: errors.New("pool exhausted")}, slog.New(slog.DiscardHandler)))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/appointments", strings.NewReader(bookingBody()))
 	req.Header.Set("Content-Type", "application/json")

@@ -28,7 +28,7 @@ func TestContract_BookingSeeded(t *testing.T) {
 	pool := dbtest.SeededPool(t)
 	avail := availability.New(db.New(pool), 15*time.Minute, longAgo)
 	bookings := booking.New(booking.NewPGStore(pool), avail, 15*time.Minute, longAgo)
-	h := NewRouter(NewServer(avail, bookings, slog.New(slog.DiscardHandler)))
+	h := newTestRouter(NewServer(avail, bookings, slog.New(slog.DiscardHandler)))
 	c := newContract(t)
 
 	// Saigon, Saturday 2026-10-31 10:00-12:00 local: a brake service (120
@@ -71,7 +71,7 @@ func TestContract_CancelSeeded(t *testing.T) {
 	pool := dbtest.SeededPool(t)
 	avail := availability.New(db.New(pool), 15*time.Minute, longAgo)
 	bookings := booking.New(booking.NewPGStore(pool), avail, 15*time.Minute, longAgo)
-	h := NewRouter(NewServer(avail, bookings, slog.New(slog.DiscardHandler)))
+	h := newTestRouter(NewServer(avail, bookings, slog.New(slog.DiscardHandler)))
 	c := newContract(t)
 
 	res, err := bookings.Book(t.Context(), booking.Request{

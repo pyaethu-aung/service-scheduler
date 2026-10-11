@@ -28,6 +28,22 @@ func init() {
 	}))
 }
 
+// testAPIKey is the API key routers built by newTestRouter require.
+const testAPIKey = "test-api-key"
+
+// newTestRouter is NewRouter with testAPIKey configured. It adds the key to
+// requests that carry none, so handler tests exercise the handlers; the
+// auth tests use NewRouter directly.
+func newTestRouter(srv *Server) http.Handler {
+	h := NewRouter(srv, Options{APIKey: testAPIKey})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(apiKeyHeader) == "" {
+			r.Header.Set(apiKeyHeader, testAPIKey)
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 // contract validates requests and responses against the embedded OpenAPI
 // document, so every handler test doubles as a contract test.
 type contract struct {
@@ -122,7 +138,7 @@ func TestContract_Healthz(t *testing.T) {
 	t.Parallel()
 
 	c := newContract(t)
-	h := NewRouter(NewServer(nil, nil, slog.New(slog.DiscardHandler)))
+	h := newTestRouter(NewServer(nil, nil, slog.New(slog.DiscardHandler)))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
 	rec := c.do(t, h, req)

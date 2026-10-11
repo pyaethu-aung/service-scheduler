@@ -20,13 +20,14 @@ import (
 	"github.com/pyaethu-aung/service-scheduler/internal/booking"
 	"github.com/pyaethu-aung/service-scheduler/internal/config"
 	"github.com/pyaethu-aung/service-scheduler/internal/db"
+	"github.com/pyaethu-aung/service-scheduler/internal/observability"
 )
 
 // shutdownTimeout bounds how long in-flight requests may drain after SIGTERM.
 const shutdownTimeout = 15 * time.Second
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := observability.NewLogger(os.Stdout)
 	if err := runUntilSignal(os.Getenv, logger, nil); err != nil {
 		logger.Error("server exited", "error", err)
 		os.Exit(1)
@@ -49,12 +50,34 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, r
 		return err
 	}
 
+	shutdownTracing, err := observability.SetupTracing(ctx, cfg.OTLPEndpoint)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(flushCtx)
+	}()
+
 	// pgxpool connects lazily, so startup does not wait on the database.
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("database pool: %w", err)
+	}
+	poolCfg.ConnConfig.Tracer = observability.QueryTracer{}
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return fmt.Errorf("database pool: %w", err)
 	}
 	defer pool.Close()
+
+	metrics := observability.NewMetrics()
+	metrics.Register(observability.NewPoolCollector(pool.Stat))
+	readiness, err := db.NewReadiness(pool)
+	if err != nil {
+		return err
+	}
 
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", cfg.ListenAddr)
@@ -62,8 +85,8 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, r
 		return fmt.Errorf("listen: %w", err)
 	}
 
-	avail := availability.New(db.New(pool), cfg.SlotGranularity, time.Now)
-	bookings := booking.New(booking.NewPGStore(pool), avail, cfg.SlotGranularity, time.Now)
+	avail := availability.New(db.New(pool), cfg.SlotGranularity, time.Now).Instrument(metrics)
+	bookings := booking.New(booking.NewPGStore(pool), avail, cfg.SlotGranularity, time.Now).Instrument(logger, metrics)
 
 	// Expire idempotency keys in the background; stop before the pool closes.
 	cleanupCtx, stopCleanup := context.WithCancel(ctx)
@@ -78,7 +101,10 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger, r
 	}()
 
 	srv := &http.Server{
-		Handler:           api.NewRouter(api.NewServer(avail, bookings, logger)),
+		Handler: api.NewRouter(
+			api.NewServer(avail, bookings, logger).WithReadiness(readiness),
+			api.Options{APIKey: cfg.APIKey, Metrics: metrics},
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
