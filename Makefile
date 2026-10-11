@@ -109,11 +109,11 @@ openapi-gen: $(OAPI_CODEGEN) ## Generate internal/api from the OpenAPI document
 
 .PHONY: check-generated
 check-generated: generate ## Fail if generated code is out of sync with its sources
-	@# Unstaged edits to generated files, plus untracked files that carry the
-	@# generated-code header (hand-written files such as tests are ignored).
-	@stale="$$(git diff --name-only -- $(GENERATED); \
-		for f in $$(git ls-files --others --exclude-standard -- $(GENERATED)); do \
-			grep -q -E '^// Code generated .* DO NOT EDIT\.$$' "$$f" && echo "$$f"; \
+	@# Unstaged edits and untracked files under the generated paths, counted
+	@# only when they carry the generated-code header: hand-written files
+	@# there, such as tests, are not generator output.
+	@stale="$$(for f in $$(git diff --name-only -- $(GENERATED); git ls-files --others --exclude-standard -- $(GENERATED)); do \
+			[ -f "$$f" ] && grep -q -E '^// Code generated .* DO NOT EDIT\.$$' "$$f" && echo "$$f"; \
 		done)"; \
 	if [ -n "$$stale" ]; then \
 		echo "generated code is out of sync: run 'make generate' and commit the result"; \
