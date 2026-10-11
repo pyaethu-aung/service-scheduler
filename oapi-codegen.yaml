@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/HEAD/configuration-schema.json
+# Generates the chi server interfaces, the strict server wrapper and the
+# models from the contract. Regenerate with `make openapi-gen`.
+package: api
+output: internal/api/openapi.gen.go
+generate:
+  chi-server: true
+  strict-server: true
+  models: true
+  # The embedded spec lets tests and request validation load the exact
+  # contract the code was generated from.
+  embedded-spec: true
+compatibility:
+  # Prefix enum constants with their type (HealthStatusOk, not Ok) so enums
+  # added by later endpoints cannot collide.
+  always-prefix-enum-values: true

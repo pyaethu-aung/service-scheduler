@@ -1,0 +1,72 @@
+openapi: 3.0.3
+info:
+  title: Service Scheduler API
+  version: 0.1.0
+  description: |
+    Books service appointments for car dealerships, assigning a free service
+    bay and a qualified technician for the whole service duration. Design:
+    docs/system-design.md. This document is the contract; server interfaces
+    are generated from it with oapi-codegen.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://localhost:8080
+    description: Local development (make run or make up)
+security:
+  - ApiKeyAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness probe
+      description: Returns 200 while the process is serving HTTP. Does not touch the database.
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    Problem:
+      type: object
+      description: RFC 9457 problem details. Extension members may be added per problem type.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: URI reference identifying the problem type.
+          example: https://service-scheduler.example/problems/slot-unavailable
+        title:
+          type: string
+          description: Short, human-readable summary of the problem type.
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: HTTP status code for this occurrence.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+        instance:
+          type: string
+          format: uri-reference
+          description: URI reference identifying this occurrence.
+      additionalProperties: true
