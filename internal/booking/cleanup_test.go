@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/pyaethu-aung/service-scheduler/internal/db"
 )
@@ -66,5 +67,26 @@ func TestRunKeyCleanup_LogsFailures(t *testing.T) {
 	svc.RunKeyCleanup(ctx, time.Millisecond, slog.New(slog.NewTextHandler(&logs, nil)))
 	if !strings.Contains(logs.String(), "cleanup failed") {
 		t.Errorf("failure not logged: %s", logs.String())
+	}
+}
+
+type unmigratedStore struct{ *fakeStore }
+
+func (unmigratedStore) DeleteExpiredIdempotencyKeys(context.Context, time.Time) (int64, error) {
+	return 0, &pgconn.PgError{Code: "42P01", Message: `relation "idempotency_keys" does not exist`}
+}
+
+func TestRunKeyCleanup_BeforeMigrationsIsAWarning(t *testing.T) {
+	t.Parallel()
+	var logs strings.Builder
+	svc := newService(newFakeStore(), &fakeAvailability{})
+	svc.store = unmigratedStore{newFakeStore()}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Millisecond)
+	defer cancel()
+	svc.RunKeyCleanup(ctx, time.Hour, slog.New(slog.NewTextHandler(&logs, nil)))
+	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "migrations not applied yet") ||
+		strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("logs = %s, want a warning and no error", logs.String())
 	}
 }
