@@ -378,9 +378,11 @@ not just written down.
 
 **Small, gated, reviewed steps.** After a bootstrap commit set up the
 tooling, the work ran as five slices, one agent run and one pull request each
-(PRs #6 to #10), then a final README PR (#11). Each slice went contract
-first, then implementation with tests, the quality gates, a live check
-against the running service, and a self-review. The agent opened each PR and
+(PRs #6 to #10), then a README PR (#11). The engineer then asked for three
+follow-ups: this narrative (#13), quieter probes after exploring Jaeger (#14)
+and a run-and-verify guide (#15). Each slice went contract first, then
+implementation with tests, the quality gates, a live check against the
+running service, and a self-review. The agent opened each PR and
 stopped; the engineer reviewed and merged every one.
 
 **Gaps escalated, not guessed.** Wherever the design left a choice open, the
@@ -425,7 +427,31 @@ the scaffold's own tooling, not the feature code:
 
 Each was fixed and recorded.
 
-<!-- Pyae: add what you caught yourself in PR review (if anything), with the PR number. The AI log covers only what the agent's gates and checks found. -->
+**What the engineer caught and changed.** The AI log covers what the agent's
+gates and checks found. These came from the engineer:
+
+- **A design gap the draft had ruled out.** The draft retried only `23P01`
+  and rejected advisory locks. When the concurrency test exposed deadlocks,
+  the engineer chose the fix in two steps from the agent's measurements:
+  first retrying `40P01`, then, when that still failed one run in four, a
+  per-dealership-day advisory lock alongside the retry (PR #8). The design
+  document now describes the lock as a companion to the constraint, which
+  stays the guarantee.
+- **The agent's recommendation overruled.** For a missing or wrong API key
+  the agent recommended `401`; the engineer chose `403` on every `/v1` route.
+  The engineer also kept every malformed or oversized booking at `422` rather
+  than adding statuses the contract does not list (PR #10).
+- **Noise in the traces, found by using them.** Exploring Jaeger on the
+  running stack, the engineer saw that the `service-scheduler` service showed
+  only `GET /metrics` traces: Prometheus scrapes every few seconds and buried
+  the real requests. The engineer asked whether probes should be traced at all.
+  PR #14 stopped tracing and access-logging `/metrics`, `/healthz` and
+  `/readyz` (they still count in the latency metric). It also stopped the
+  readiness check's SQL from appearing as stray root traces.
+- **Failing dependency PRs.** The engineer spotted that the four Dependabot
+  PRs (#1 to #4) failed CI. The cause was govulncheck findings in the Go
+  standard library and `golang.org/x/text`, patched in PR #5 (Go 1.26.9 and
+  a newer `x/text`) before they were merged.
 
 ### Quality
 
